@@ -36,11 +36,11 @@ export function TimeSeriesChart({ data, xKey, yKey, title }: TimeSeriesChartProp
       <CardContent className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={points} margin={{ left: -20, right: 12, top: 8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="time" tick={{ fontSize: 11 }} minTickGap={24} />
             <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
-            <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+            <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)" }} />
+            <Line type="monotone" dataKey="value" stroke="var(--primary)" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </CardContent>

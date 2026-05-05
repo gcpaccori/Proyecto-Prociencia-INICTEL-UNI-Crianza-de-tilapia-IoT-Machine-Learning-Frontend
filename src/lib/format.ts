@@ -23,7 +23,7 @@ export function formatValue(value: unknown): string {
 export function statusVariant(value: unknown): StatusVariant {
   const status = String(value ?? "").toLowerCase()
   if (/(error|caida|critical|high|open|destructive|invalid|blocked|failed)/.test(status)) return "destructive"
-  if (/(pending|approval|warning|medium|incomplete|omitido|fallback)/.test(status)) return "secondary"
+  if (/(pending|approval|warning|medium|incomplete|omitido|fallback|required|requires|needs|dry|metadata|artifact|formula)/.test(status)) return "secondary"
   if (/(ready|ok|active|connected|conectada|valid|success|closed|low)/.test(status)) return "default"
   return "outline"
 }

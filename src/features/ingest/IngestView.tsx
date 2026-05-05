@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { defaultWaterVariable, variableMeta, waterVariables } from "@/config/variables"
 import { apiGet, apiPost } from "@/lib/api"
-import { pickId, pickName, pickValue, unwrapList } from "@/lib/normalize"
-
-const variables = ["water_temperature_c", "dissolved_oxygen_mg_l", "ph", "ammonia_mg_l", "biomass_kg", "feed_kg"]
+import { formatValue } from "@/lib/format"
+import { pickId, pickName, pickValue, query, unwrapList } from "@/lib/normalize"
 
 export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
   const queryClient = useQueryClient()
@@ -21,7 +21,7 @@ export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
     farm_id: selectedFarmId,
     pond_id: selectedPondId,
     sensor_id: "",
-    variable_code: "water_temperature_c",
+    variable_code: defaultWaterVariable,
     raw_value: "",
     raw_unit: "degC",
     source_type: "manual",
@@ -32,8 +32,8 @@ export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
   const rawQuery = useQuery({ queryKey: ["measurements-raw"], queryFn: () => apiGet<unknown>("/measurements/raw?limit=100") })
   const cleanQuery = useQuery({ queryKey: ["measurements-clean"], queryFn: () => apiGet<unknown>("/measurements/clean?limit=100") })
   const timeseriesQuery = useQuery({
-    queryKey: ["pond-timeseries", form.pond_id || selectedPondId],
-    queryFn: () => apiGet<unknown>(`/ponds/${form.pond_id || selectedPondId}/timeseries`),
+    queryKey: ["pond-timeseries", form.pond_id || selectedPondId, form.variable_code],
+    queryFn: () => apiGet<unknown>(query(`/ponds/${form.pond_id || selectedPondId}/timeseries`, { variable_code: form.variable_code })),
     enabled: Boolean(form.pond_id || selectedPondId),
   })
   const mutation = useMutation({
@@ -60,6 +60,9 @@ export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
   const sensors = unwrapList(sensorsQuery.data).filter((sensor) => !(form.pond_id || selectedPondId) || sensor.pond_id === (form.pond_id || selectedPondId))
   const rawRows = unwrapList(rawQuery.data).filter((row) => !selectedPondId || row.pond_id === selectedPondId)
   const cleanRows = unwrapList(cleanQuery.data).filter((row) => !selectedPondId || row.pond_id === selectedPondId)
+  const chartRows = unwrapList(timeseriesQuery.data)
+  const selectedMeta = variableMeta(form.variable_code)
+  const lastValue = pickValue(chartRows.at(-1) ?? {}, ["clean_value", "raw_value", "value"])
   const invalidValue = form.raw_value !== "" && !Number.isFinite(Number(form.raw_value))
   const setField = (name: keyof typeof form, value: string) => setForm((current) => ({ ...current, [name]: value }))
 
@@ -93,7 +96,7 @@ export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
           </Select>
           <Select value={form.variable_code} onValueChange={(value) => setField("variable_code", value)}>
             <SelectTrigger><SelectValue placeholder="variable" /></SelectTrigger>
-            <SelectContent>{variables.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
+            <SelectContent>{waterVariables.map((item) => <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>)}</SelectContent>
           </Select>
           <Input value={form.raw_value} onChange={(event) => setField("raw_value", event.target.value)} placeholder="valor" />
           <Input value={form.raw_unit} onChange={(event) => setField("raw_unit", event.target.value)} placeholder="unidad" />
@@ -107,7 +110,12 @@ export function IngestView({ selectedFarmId, selectedPondId }: ViewContext) {
         </CardContent>
       </Card>
       <section className="space-y-4">
-        <TimeSeriesChart data={timeseriesQuery.data} title="Serie temporal del estanque" />
+        <div className="space-y-3">
+          <div className="mb-3 text-xs text-muted-foreground">
+            {selectedMeta.label}: {formatValue(lastValue)} {selectedMeta.unit}
+          </div>
+          <TimeSeriesChart data={timeseriesQuery.data} title={`Serie temporal - ${selectedMeta.label}`} />
+        </div>
         <div className="grid gap-4 xl:grid-cols-2">
           <AutoTable title="Mediciones raw" data={rawRows} columns={["time", "variable_code", "raw_value", "raw_unit", "source_type"]} isLoading={rawQuery.isLoading} error={rawQuery.error} />
           <AutoTable title="Mediciones clean" data={cleanRows} columns={["time", "variable_code", "clean_value", "standard_unit", "quality_flag"]} isLoading={cleanQuery.isLoading} error={cleanQuery.error} />

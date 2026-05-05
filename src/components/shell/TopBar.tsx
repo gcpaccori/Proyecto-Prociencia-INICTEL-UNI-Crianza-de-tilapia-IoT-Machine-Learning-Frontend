@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/common/StatusBadge"
@@ -23,6 +24,14 @@ export function TopBar({ selectedFarmId, selectedPondId, onFarmChange, onPondCha
   const healthObject = unwrapObject(health.data)
   const lastUpdated = pickValue(healthObject, ["timestamp"]) ?? health.dataUpdatedAt
 
+  useEffect(() => {
+    if (!selectedFarmId && farms[0]) onFarmChange(pickId(farms[0]))
+  }, [farms, onFarmChange, selectedFarmId])
+
+  useEffect(() => {
+    if (ponds[0] && (!selectedPondId || !ponds.some((pond) => pickId(pond) === selectedPondId))) onPondChange(pickId(ponds[0]))
+  }, [onPondChange, ponds, selectedPondId])
+
   return (
     <header className="flex min-h-16 flex-wrap items-center gap-3 border-b border-border bg-background/95 px-4 py-3">
       <div className="min-w-56 flex-1">
@@ -31,7 +40,7 @@ export function TopBar({ selectedFarmId, selectedPondId, onFarmChange, onPondCha
       </div>
       <StatusBadge value={health.isSuccess ? "ok" : health.isError ? "down" : "pending"} />
       <Select value={selectedFarmId || "none"} onValueChange={(value) => onFarmChange(value === "none" ? "" : value)}>
-        <SelectTrigger className="h-9 w-56">
+        <SelectTrigger className="h-9 w-full sm:w-72">
           <SelectValue placeholder="granja" />
         </SelectTrigger>
         <SelectContent>
@@ -44,7 +53,7 @@ export function TopBar({ selectedFarmId, selectedPondId, onFarmChange, onPondCha
         </SelectContent>
       </Select>
       <Select value={selectedPondId || "none"} onValueChange={(value) => onPondChange(value === "none" ? "" : value)}>
-        <SelectTrigger className="h-9 w-56">
+        <SelectTrigger className="h-9 w-full sm:w-56">
           <SelectValue placeholder="estanque" />
         </SelectTrigger>
         <SelectContent>
