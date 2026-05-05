@@ -1,0 +1,13 @@
+node_modules
+dist
+test-results
+.env
+.DS_Store
+*.local
+.dev-server.pid
+dev-server.out.log
+dev-server.err.log
+browser-check.png
+browser-check.har
+browser-check.spec.ts
+tests/browser-check.spec.ts
