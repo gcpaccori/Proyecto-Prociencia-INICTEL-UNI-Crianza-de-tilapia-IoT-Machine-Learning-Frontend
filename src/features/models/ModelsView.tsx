@@ -19,9 +19,6 @@ import {
   FileJson,
   FileText,
   Fish,
-  GitBranch,
-  Home,
-  Layers3,
   Lock,
   MoreVertical,
   Play,
@@ -30,7 +27,6 @@ import {
   RotateCcw,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   TestTube2,
   Timer,
@@ -48,7 +44,6 @@ import {
 } from "recharts"
 
 import type { ViewContext } from "@/App"
-import type { ViewId } from "@/config/navigation"
 import { apiGet, apiPost } from "@/lib/api"
 import { pickId, pickName, pickValue, query, unwrapList, unwrapObject, type Row } from "@/lib/normalize"
 
@@ -288,13 +283,17 @@ function useDashboardEndpoint(selectedFarmId: string, selectedPondId: string, ra
   })
 }
 
+interface ModelsViewProps extends ViewContext {
+  embedded?: boolean
+}
+
 export function ModelsView({
   selectedFarmId,
   selectedPondId,
   onFarmChange,
   onPondChange,
-  onViewChange,
-}: ViewContext) {
+  embedded,
+}: ModelsViewProps) {
   const queryClient = useQueryClient()
   const [screen, setScreen] = useState<ScreenMode>("center")
   const [rangeLabel, setRangeLabel] = useState("Ultimas 24 horas")
@@ -489,12 +488,82 @@ export function ModelsView({
     setModelCodeState(code)
     setJsonPanel(null)
   }
-  const navigate = (view: ViewId) => {
-    if (view === "models") {
-      openCenter()
-      return
-    }
-    onViewChange?.(view)
+
+  const content =
+    screen === "center" ? (
+      <ModelsCenter
+        dashboard={dashboard}
+        componentSummary={componentSummary}
+        modelRows={filteredModels}
+        allModelRows={modelRows}
+        traceability={traceability}
+        familyFilter={familyFilter}
+        statusFilter={statusFilter}
+        selectedModelCode={selectedModelCode}
+        activeModel={activeModel}
+        activeAudit={activeAudit}
+        activeFamily={activeFamily}
+        activeComponent={activeComponent}
+        lastRun={lastRun}
+        payload={testPayloadQuery.data}
+        testResult={latestResult}
+        isLoading={dashboardQuery.isLoading || catalogQuery.isLoading}
+        error={dashboardQuery.error ?? catalogQuery.error}
+        testRunAllPending={testRunAllMutation.isPending}
+        onFamilyFilter={setFamilyFilter}
+        onStatusFilter={setStatusFilter}
+        onSelectModel={selectModel}
+        onOpenRunner={openRunner}
+        onGeneratePayload={handleGeneratePayload}
+        onTestRun={(code) => testRunMutation.mutate(code ?? selectedModelCode)}
+        onTestRunAll={() => testRunAllMutation.mutate()}
+        onOpenJson={(title, value) => setJsonPanel({ title, value })}
+      />
+    ) : (
+      <ModelRunner
+        dashboard={dashboard}
+        activeModel={activeModel}
+        activeAudit={activeAudit}
+        fields={fields}
+        formFields={formFields}
+        autoInputs={autoInputs}
+        generatedInputs={generatedInputs}
+        selectedModelCode={selectedModelCode}
+        selectedFarmId={selectedFarmId || firstFarmId}
+        selectedPondId={selectedPondId || firstPondId}
+        productivePayload={productivePayload}
+        blockedBy={blockedBy}
+        missingManual={missingManual}
+        unitMismatches={unitMismatches}
+        generatedUsed={generatedUsed}
+        lastRun={lastRun}
+        result={latestResult}
+        testPayload={testPayloadQuery.data}
+        testPayloadLoading={testPayloadQuery.isFetching}
+        testRunPending={testRunMutation.isPending}
+        runPending={runMutation.isPending}
+        testError={testRunMutation.error}
+        runError={runMutation.error}
+        canTestRun={canTestRun}
+        canProductRun={canProductRun}
+        getFieldValue={getFieldValue}
+        setFieldValue={setFieldValue}
+        onBack={openCenter}
+        onReset={resetActiveManualInputs}
+        onGeneratePayload={handleGeneratePayload}
+        onTestRun={() => testRunMutation.mutate(selectedModelCode)}
+        onProductiveRun={() => runMutation.mutate()}
+        onOpenJson={(title, value) => setJsonPanel({ title, value })}
+      />
+    )
+
+  if (embedded) {
+    return (
+      <>
+        {content}
+        {jsonPanel ? <JsonPanel panel={jsonPanel} onClose={() => setJsonPanel(null)} /> : null}
+      </>
+    )
   }
 
   return (
@@ -511,77 +580,7 @@ export function ModelsView({
         onPondChange={(pondId) => onPondChange?.(pondId)}
         onRangeChange={setRangeLabel}
       />
-      <div className="studio-shell">
-        <SidebarStudio activeScreen={screen} onNavigate={navigate} onCenter={openCenter} />
-        <main className="studio-workspace">
-          {screen === "center" ? (
-            <ModelsCenter
-              dashboard={dashboard}
-              componentSummary={componentSummary}
-              modelRows={filteredModels}
-              allModelRows={modelRows}
-              traceability={traceability}
-              familyFilter={familyFilter}
-              statusFilter={statusFilter}
-              selectedModelCode={selectedModelCode}
-              activeModel={activeModel}
-              activeAudit={activeAudit}
-              activeFamily={activeFamily}
-              activeComponent={activeComponent}
-              lastRun={lastRun}
-              payload={testPayloadQuery.data}
-              testResult={latestResult}
-              isLoading={dashboardQuery.isLoading || catalogQuery.isLoading}
-              error={dashboardQuery.error ?? catalogQuery.error}
-              testRunAllPending={testRunAllMutation.isPending}
-              onFamilyFilter={setFamilyFilter}
-              onStatusFilter={setStatusFilter}
-              onSelectModel={selectModel}
-              onOpenRunner={openRunner}
-              onGeneratePayload={handleGeneratePayload}
-              onTestRun={(code) => testRunMutation.mutate(code ?? selectedModelCode)}
-              onTestRunAll={() => testRunAllMutation.mutate()}
-              onOpenJson={(title, value) => setJsonPanel({ title, value })}
-            />
-          ) : (
-            <ModelRunner
-              dashboard={dashboard}
-              activeModel={activeModel}
-              activeAudit={activeAudit}
-              fields={fields}
-              formFields={formFields}
-              autoInputs={autoInputs}
-              generatedInputs={generatedInputs}
-              selectedModelCode={selectedModelCode}
-              selectedFarmId={selectedFarmId || firstFarmId}
-              selectedPondId={selectedPondId || firstPondId}
-              productivePayload={productivePayload}
-              blockedBy={blockedBy}
-              missingManual={missingManual}
-              unitMismatches={unitMismatches}
-              generatedUsed={generatedUsed}
-              lastRun={lastRun}
-              result={latestResult}
-              testPayload={testPayloadQuery.data}
-              testPayloadLoading={testPayloadQuery.isFetching}
-              testRunPending={testRunMutation.isPending}
-              runPending={runMutation.isPending}
-              testError={testRunMutation.error}
-              runError={runMutation.error}
-              canTestRun={canTestRun}
-              canProductRun={canProductRun}
-              getFieldValue={getFieldValue}
-              setFieldValue={setFieldValue}
-              onBack={openCenter}
-              onReset={resetActiveManualInputs}
-              onGeneratePayload={handleGeneratePayload}
-              onTestRun={() => testRunMutation.mutate(selectedModelCode)}
-              onProductiveRun={() => runMutation.mutate()}
-              onOpenJson={(title, value) => setJsonPanel({ title, value })}
-            />
-          )}
-        </main>
-      </div>
+      <main className="studio-workspace">{content}</main>
       {jsonPanel ? <JsonPanel panel={jsonPanel} onClose={() => setJsonPanel(null)} /> : null}
     </div>
   )
@@ -731,64 +730,6 @@ function SelectPill({
       </select>
       <ChevronDown size={16} />
     </label>
-  )
-}
-
-function SidebarStudio({
-  activeScreen,
-  onNavigate,
-  onCenter,
-}: {
-  activeScreen: ScreenMode
-  onNavigate: (view: ViewId) => void
-  onCenter: () => void
-}) {
-  const items: { Icon: LucideIcon; label: string; view?: ViewId; action?: () => void }[] = [
-    { Icon: Home, label: "Resumen", view: "operation" },
-    { Icon: SlidersHorizontal, label: "Operacion", view: "operation" },
-    { Icon: Box, label: "Centro de Modelos", action: onCenter },
-    { Icon: Layers3, label: "Arquitectura", view: "management" },
-    { Icon: Database, label: "Gemelo digital", view: "digitalTwin" },
-    { Icon: AlertTriangle, label: "Riesgos", view: "alerts" },
-    { Icon: ShieldCheck, label: "Recomendaciones", view: "alerts" },
-    { Icon: GitBranch, label: "Actuadores", view: "actuation" },
-    { Icon: ClipboardList, label: "Trazabilidad", action: onCenter },
-  ]
-
-  return (
-    <aside className="sidebar">
-      <nav>
-        {items.map(({ Icon, label, view, action }) => (
-          <button
-            type="button"
-            key={label}
-            className={label === "Centro de Modelos" ? "side-item active" : "side-item"}
-            onClick={() => (action ? action() : view ? onNavigate(view) : undefined)}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
-
-      <div className="system-card">
-        <div className="system-title">
-          <span className="green-dot" />
-          <div>
-            <strong>Estado del sistema</strong>
-            <em>{activeScreen === "runner" ? "Validando" : "Operativo"}</em>
-          </div>
-        </div>
-        <dl>
-          <dt>Uptime</dt>
-          <dd>99.85%</dd>
-          <dt>Latencia API</dt>
-          <dd>112 ms</dd>
-          <dt>Ultima verificacion</dt>
-          <dd>{formatDateTime(Date.now())}</dd>
-        </dl>
-      </div>
-    </aside>
   )
 }
 

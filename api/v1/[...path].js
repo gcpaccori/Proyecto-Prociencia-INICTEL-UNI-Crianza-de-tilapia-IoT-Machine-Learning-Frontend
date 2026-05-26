@@ -29,6 +29,24 @@ function readBody(request) {
   })
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchWithRetry(url, init, retryable) {
+  let lastError
+  const attempts = retryable ? 3 : 1
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, init)
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts) await wait(180 * attempt)
+    }
+  }
+  throw lastError
+}
+
 export default async function handler(request, response) {
   if (request.method === "OPTIONS") {
     response.statusCode = 204
@@ -53,12 +71,21 @@ export default async function handler(request, response) {
   const suffix = search.toString() ? `?${search.toString()}` : ""
   const upstreamUrl = `${targetBaseUrl()}/api/v1/${rawPath}${suffix}`
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request)
-  const upstream = await fetch(upstreamUrl, {
-    method: request.method,
-    headers: cleanHeaders(request.headers),
-    body,
-    redirect: "manual",
-  })
+  let upstream
+  try {
+    upstream = await fetchWithRetry(upstreamUrl, {
+      method: request.method,
+      headers: cleanHeaders(request.headers),
+      body,
+      redirect: "manual",
+    }, request.method === "GET" || request.method === "HEAD")
+  } catch {
+    response.statusCode = 502
+    response.setHeader("Access-Control-Allow-Origin", "*")
+    response.setHeader("content-type", "application/json; charset=utf-8")
+    response.end(JSON.stringify({ detail: "API proxy error", upstream: targetBaseUrl() }))
+    return
+  }
 
   response.statusCode = upstream.status
   upstream.headers.forEach((value, key) => {

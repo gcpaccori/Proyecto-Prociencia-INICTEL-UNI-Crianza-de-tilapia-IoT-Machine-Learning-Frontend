@@ -12,6 +12,24 @@ function readRequestBody(request: import("node:http").IncomingMessage) {
   })
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, retryable: boolean) {
+  let lastError: unknown
+  const attempts = retryable ? 3 : 1
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, init)
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts) await wait(180 * attempt)
+    }
+  }
+  throw lastError
+}
+
 function apiDevProxy(targetUrl: string) {
   const target = targetUrl.replace(/\/$/, "")
   return {
@@ -30,7 +48,7 @@ function apiDevProxy(targetUrl: string) {
           })
           headers.set("user-agent", "")
           const body = method === "GET" || method === "HEAD" ? undefined : await readRequestBody(request)
-          const upstream = await fetch(upstreamUrl, { method, headers, body, redirect: "manual" })
+          const upstream = await fetchWithRetry(upstreamUrl, { method, headers, body, redirect: "manual" }, method === "GET" || method === "HEAD")
           response.statusCode = upstream.status
           upstream.headers.forEach((value, key) => {
             if (["content-encoding", "content-length", "transfer-encoding"].includes(key.toLowerCase())) return
@@ -40,7 +58,8 @@ function apiDevProxy(targetUrl: string) {
         } catch (error) {
           console.error("[aquatwin-api-dev-proxy]", error)
           response.statusCode = 502
-          response.end("API proxy error")
+          response.setHeader("content-type", "application/json; charset=utf-8")
+          response.end(JSON.stringify({ detail: "API proxy error", upstream: target }))
         }
       })
     },
