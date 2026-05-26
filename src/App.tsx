@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 
 import { AppShell } from "@/components/shell/AppShell"
-import { navigationItems, type ViewId } from "@/config/navigation"
+import type { ViewId } from "@/config/navigation"
 import { ActuationView } from "@/features/actuation/ActuationView"
 import { AlertsView } from "@/features/alerts/AlertsView"
 import { DigitalTwinView } from "@/features/digital-twin/DigitalTwinView"
@@ -10,11 +10,14 @@ import { ManagementView } from "@/features/management/ManagementView"
 import { ModelsView } from "@/features/models/ModelsView"
 import { OperationView } from "@/features/operation/OperationView"
 
-const initialView = navigationItems[0].id
+const initialView: ViewId = "models"
 
 export interface ViewContext {
   selectedFarmId: string
   selectedPondId: string
+  onFarmChange?: (farmId: string) => void
+  onPondChange?: (pondId: string) => void
+  onViewChange?: (view: ViewId) => void
 }
 
 function getStored(key: string) {
@@ -40,7 +43,13 @@ export function App() {
     localStorage.setItem("selectedPondId", pondId)
   }
 
-  const context = { selectedFarmId, selectedPondId }
+  const context = {
+    selectedFarmId,
+    selectedPondId,
+    onFarmChange: changeFarm,
+    onPondChange: changePond,
+    onViewChange: setSelectedView,
+  }
   const views: Record<ViewId, ReactNode> = {
     operation: <OperationView {...context} />,
     management: <ManagementView />,
@@ -49,6 +58,10 @@ export function App() {
     models: <ModelsView {...context} />,
     alerts: <AlertsView {...context} />,
     actuation: <ActuationView {...context} />,
+  }
+
+  if (selectedView === "models") {
+    return <ModelsView {...context} />
   }
 
   return (
