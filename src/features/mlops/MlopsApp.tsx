@@ -32,6 +32,10 @@ import {
 import {
   Bar,
   BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -47,6 +51,7 @@ type StatusKind = "success" | "warning" | "info" | "danger" | "purple" | "neutra
 
 const defaultPond = "LEGACY-POND-1"
 const defaultModel = "ML_SUPERVISED_LINEAR_REG"
+const preferredVisualModel = "ML_NONLINEAR_SVM"
 const defaultVariables = ["water_temperature_c", "ph", "dissolved_oxygen_mg_l", "nitrate_ion"]
 
 const modelUiCatalog: Record<string, { name: string; family: string; purpose: string; output: string }> = {
@@ -872,16 +877,26 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   const activeAssets = rows(assetsQuery.data)
   const jobs = rows(jobsQuery.data)
   const featureSets = rows(featuresQuery.data)
-  const [selectedModelCode, setSelectedModelCode] = useState(defaultModel)
+  const [selectedModelCode, setSelectedModelCode] = useState(preferredVisualModel)
   const selectedAsset = activeAssets.find((asset) => text(asset.model_code, "") === selectedModelCode) ?? {}
   const selectedTrainable = trainable.find((model) => text(model.model_code, "") === selectedModelCode) ?? {}
   const selectedJob = jobs.find((job) => text(job.job_id, "") === text(selectedAsset.training_job_id, "")) ?? {}
   const featureSetId = text(selectedAsset.feature_set_id, "")
+  const selectedFeatureSet = featureSets.find((featureSet) => text(featureSet.feature_set_id, "") === featureSetId) ?? {}
   const previewQuery = useQuery({
     queryKey: ["model-feature-preview", featureSetId],
     queryFn: () => apiGet<unknown>(`/features/${featureSetId}/preview`),
     enabled: Boolean(featureSetId),
   })
+  const previewObject = unwrapObject(previewQuery.data)
+  const previewRows = rows(previewObject.preview_rows)
+  const previewColumns = rows(previewObject.columns).length ? rows(previewObject.columns) : rows(selectedFeatureSet.columns)
+  const targetVariable = text(
+    previewColumns.find((column) => text(column.role, "") === "target")?.source_variable ??
+      selectedFeatureSet.target_variable ??
+      row(selectedAsset.artifact_payload).target_variable,
+    "variable objetivo",
+  )
   const featureNames = getFeatureNames(selectedAsset, selectedAsset.metrics_json)
   const [featureValues, setFeatureValues] = useState<Record<string, string>>({})
   const predictMutation = useMutation({
@@ -890,8 +905,33 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
         features: Object.fromEntries(featureNames.map((name) => [name, Number(featureValues[name] ?? 0)])),
       }),
   })
+  const demoMutation = useMutation({
+    mutationFn: async () => {
+      const sourceRows = previewRows.slice(0, 18)
+      const results: Row[] = []
+      for (const sample of sourceRows) {
+        const features = Object.fromEntries(featureNames.map((name) => [name, numberValue(sample[name])]))
+        const prediction = await apiPost<unknown>(`/models/${selectedModelCode}/predict`, { features })
+        results.push({
+          label: String(results.length + 1),
+          index: numberValue(sample.row_index, results.length),
+          observed: numberValue(sample.target),
+          predicted: numberValue(row(prediction).prediction),
+          error: Math.abs(numberValue(sample.target) - numberValue(row(prediction).prediction)),
+          ...features,
+        })
+      }
+      return results
+    },
+  })
   const modelsToShow = mergeModelRows(trainable, activeAssets)
   const activeCount = activeAssets.length
+  const previewChartRows = useMemo(() => buildPreviewChartRows(previewRows, featureNames), [previewRows, featureNames])
+  const demoRows = Array.isArray(demoMutation.data) ? demoMutation.data : []
+  const chartRows = demoRows.length ? demoRows : previewChartRows
+  const pearsonRows = useMemo(() => buildPearsonRows(previewColumns), [previewColumns])
+  const latestDemoRow = demoRows[demoRows.length - 1] ?? {}
+  const averageError = demoRows.length ? demoRows.reduce((sum, item) => sum + numberValue(item.error), 0) / demoRows.length : null
 
   useEffect(() => {
     if (activeAssets.length && !activeAssets.some((asset) => text(asset.model_code, "") === selectedModelCode)) {
@@ -899,8 +939,7 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
     }
   }, [activeAssets, selectedModelCode])
 
-  const loadSample = () => {
-    const sample = row(rows(previewQuery.data)[0])
+  const fillSample = (sample: Row) => {
     if (!Object.keys(sample).length) return
     setFeatureValues((current) => {
       const next = { ...current }
@@ -909,6 +948,15 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
       })
       return next
     })
+  }
+
+  const loadSample = () => {
+    fillSample(row(previewRows[0]))
+  }
+
+  const runAutoDemo = () => {
+    fillSample(row(previewRows[0]))
+    demoMutation.mutate()
   }
 
   return (
@@ -920,13 +968,23 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <div className="institution-lockup">INICTEL-UNI · PROCIENCIA</div>
       </section>
-      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? previewQuery.error ?? predictMutation.error} />
+      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
       <section className="kpi-grid lifecycle-kpis">
         <Kpi icon={<Database />} label="Limpiezas" value={text(lifecycle.cleaning_enabled ? rowsCountHint(lifecycle, "cleaning") : "0")} note="datos trazables" />
         <Kpi icon={<Table2 />} label="Feature sets" value={text(lifecycle.total_feature_sets, "0")} note={`${featureSets.length} listados`} color="green" />
         <Kpi icon={<Brain />} label="Entrenamientos" value={text(lifecycle.total_training_jobs, "0")} note="jobs registrados" color="purple" />
         <Kpi icon={<Boxes />} label="Activos" value={String(activeCount)} note="modelos productivos" color="amber" />
         <Kpi icon={<Rocket />} label="Inferencia" value={text(lifecycle.model_assets_enabled ? "ON" : "OFF")} note="con trazabilidad" />
+      </section>
+      <section className="studio-card model-showcase">
+        <div>
+          <span>Modelo seleccionado</span>
+          <strong>{modelTitle(selectedModelCode)}</strong>
+          <p>Objetivo: {targetVariable}. Use la prueba automatica para llenar variables, ejecutar inferencias reales y ver la proyeccion en el grafico.</p>
+        </div>
+        <button type="button" className="run-demo-action" disabled={!selectedAsset.asset_id || !previewRows.length || demoMutation.isPending} onClick={runAutoDemo}>
+          <Rocket size={18} /> {demoMutation.isPending ? "Probando modelo" : "Autorrellenar y probar modelo"}
+        </button>
       </section>
       <section className="model-lifecycle-layout">
         <div className="studio-card model-list-panel">
@@ -983,15 +1041,76 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
               </div>
             </section>
           </section>
+          <section className="studio-card mlops-card model-detail-card model-chart-card">
+            <div className="card-head">
+              <div>
+                <h2>PROYECCION Y PRUEBA VISUAL</h2>
+                <p className="soft">{demoRows.length ? "Predicciones reales ejecutadas contra el backend." : "Vista previa con datos preparados. Pulse la prueba automatica para generar predicciones."}</p>
+              </div>
+              <Badge kind={demoRows.length ? "success" : "info"}>{demoRows.length ? `${demoRows.length} inferencias` : "preview"}</Badge>
+            </div>
+            <div className="model-insight-row">
+              <div>
+                <span>Objetivo</span>
+                <strong>{targetVariable}</strong>
+              </div>
+              <div>
+                <span>Ultimo predicho</span>
+                <strong>{demoRows.length ? formatNumber(latestDemoRow.predicted, 4) : "-"}</strong>
+              </div>
+              <div>
+                <span>Error medio</span>
+                <strong>{averageError === null ? "-" : formatNumber(averageError, 4)}</strong>
+              </div>
+              <div>
+                <span>Muestras graficadas</span>
+                <strong>{chartRows.length}</strong>
+              </div>
+            </div>
+            <div className="model-chart-grid">
+              <div className="chart-panel chart-panel-wide">
+                <h3>Serie del estanque: observado vs predicho</h3>
+                <ResponsiveContainer width="100%" height={310}>
+                  <LineChart data={chartRows} margin={{ top: 12, right: 18, left: -12, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(value) => formatNumber(value, 5)} labelFormatter={(label) => `Muestra ${label}`} />
+                    <Legend />
+                    <Line type="monotone" dataKey="observed" name="Observado" stroke="#0ea5e9" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="predicted" name="Predicho por modelo" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} connectNulls />
+                    <Line type="monotone" dataKey="trend" name="Tendencia preview" stroke="#8b5cf6" strokeDasharray="6 4" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="chart-panel">
+                <h3>Variables con mayor senal</h3>
+                <ResponsiveContainer width="100%" height={310}>
+                  <BarChart data={pearsonRows} layout="vertical" margin={{ top: 12, right: 18, left: 18, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} />
+                    <YAxis dataKey="name" type="category" width={128} tick={{ fontSize: 10 }} />
+                    <Tooltip formatter={(value) => formatNumber(value, 5)} />
+                    <Bar dataKey="score" name="Pearson abs." fill="#1976ff" radius={[0, 8, 8, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </section>
           <section className="studio-card mlops-card model-detail-card">
             <div className="card-head">
               <div>
                 <h2>INFERENCIA GUIADA</h2>
-                <p className="soft">Use una muestra real del feature set o escriba valores manuales.</p>
+                <p className="soft">Para productores tecnicos: un clic carga datos reales preparados y otro ejecuta el modelo activo.</p>
               </div>
-              <button type="button" className="mini-btn mini-btn-primary" disabled={!featureSetId || !rows(previewQuery.data).length} onClick={loadSample}>
-                Cargar muestra
-              </button>
+              <div className="inference-actions">
+                <button type="button" className="mini-btn mini-btn-primary" disabled={!featureSetId || !previewRows.length} onClick={loadSample}>
+                  Autorrellenar
+                </button>
+                <button type="button" className="mini-btn mini-btn-success" disabled={!selectedAsset.asset_id || !previewRows.length || demoMutation.isPending} onClick={runAutoDemo}>
+                  Probar con datos reales
+                </button>
+              </div>
             </div>
             <div className="model-inference-grid">
               <div className="field-grid">
@@ -1025,6 +1144,38 @@ function mergeModelRows(trainable: Row[], activeAssets: Row[]) {
     byCode.set(code, { ...byCode.get(code), ...asset, lifecycle_status: "active" })
   })
   return Array.from(byCode.values()).filter((item) => text(item.model_code, ""))
+}
+
+function buildPreviewChartRows(previewRows: Row[], featureNames: string[]) {
+  const rowsForChart = previewRows.slice(0, 26)
+  return rowsForChart.map((sample, index) => {
+    const observed = numberValue(sample.target)
+    const previous = rowsForChart[index - 1] ? numberValue(rowsForChart[index - 1].target) : observed
+    const next = rowsForChart[index + 1] ? numberValue(rowsForChart[index + 1].target) : observed
+    return {
+      label: String(index + 1),
+      index: numberValue(sample.row_index, index),
+      observed,
+      trend: (previous + observed + next) / 3,
+      [featureNames[0] ?? "feature_1"]: numberValue(sample[featureNames[0] ?? ""]),
+      [featureNames[1] ?? "feature_2"]: numberValue(sample[featureNames[1] ?? ""]),
+    }
+  })
+}
+
+function buildPearsonRows(columns: Row[]) {
+  const source = columns.filter((column) => text(column.role, "") === "feature")
+  const rowsForChart = source.length ? source : defaultVariables.map((name) => ({ name, pearson_score: 0 }))
+  return rowsForChart
+    .map((column) => {
+      const item = row(column)
+      return {
+        name: text(item.name ?? item.source_variable, "variable"),
+        score: Math.abs(numberValue(item.pearson_score)),
+      }
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6)
 }
 
 function rowsCountHint(lifecycle: Row, key: string) {

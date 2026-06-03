@@ -2177,6 +2177,64 @@
   margin-bottom: 14px;
 }
 
+.aquatwin-studio .model-showcase {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 14px;
+  border-color: #a9d6ff;
+  background: linear-gradient(135deg, #ffffff 0%, #f1f8ff 54%, #f6fff9 100%);
+  padding: 18px;
+}
+
+.aquatwin-studio .model-showcase span {
+  display: block;
+  color: #55708e;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.aquatwin-studio .model-showcase strong {
+  display: block;
+  margin: 3px 0;
+  color: #10243c;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.aquatwin-studio .model-showcase p {
+  max-width: 880px;
+  margin: 0;
+  color: #3e536d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.aquatwin-studio .run-demo-action {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #0b84ff;
+  border-radius: 12px;
+  background: #0b84ff;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 900;
+  padding: 0 18px;
+  white-space: nowrap;
+  box-shadow: 0 12px 28px rgba(25, 118, 255, 0.22);
+}
+
+.aquatwin-studio .run-demo-action:disabled {
+  border-color: #cbd8e6;
+  background: #e9eff6;
+  color: #73839a;
+  box-shadow: none;
+}
+
 .aquatwin-studio .model-lifecycle-layout {
   display: grid;
   grid-template-columns: minmax(300px, 0.42fr) minmax(0, 1fr);
@@ -2333,6 +2391,71 @@
   padding: 12px;
 }
 
+.aquatwin-studio .model-chart-card {
+  overflow: hidden;
+}
+
+.aquatwin-studio .model-insight-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.aquatwin-studio .model-insight-row div {
+  min-width: 0;
+  border: 1px solid var(--at-border);
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.aquatwin-studio .model-insight-row span {
+  display: block;
+  overflow: hidden;
+  color: #607188;
+  font-size: 11px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aquatwin-studio .model-insight-row strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #13263f;
+  font-size: 16px;
+  margin-top: 4px;
+}
+
+.aquatwin-studio .model-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
+  gap: 12px;
+}
+
+.aquatwin-studio .chart-panel {
+  min-width: 0;
+  border: 1px solid var(--at-border);
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.aquatwin-studio .chart-panel h3 {
+  margin: 0 0 8px;
+  color: #18314f;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.aquatwin-studio .inference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 1520px) {
   .aquatwin-studio .top-pill.select-pill {
     min-width: 170px;
@@ -2344,6 +2467,7 @@
 
   .aquatwin-studio .models-layout,
   .aquatwin-studio .model-lifecycle-layout,
+  .aquatwin-studio .model-chart-grid,
   .aquatwin-studio .runner-grid,
   .aquatwin-studio .runner-bottom-grid,
   .aquatwin-studio .bottom-grid,
@@ -2422,6 +2546,7 @@
   .aquatwin-studio .explain-row,
   .aquatwin-studio .inspector-content,
   .aquatwin-studio .lifecycle-steps,
+  .aquatwin-studio .model-insight-row,
   .aquatwin-studio .mlops-grid,
   .aquatwin-studio .mlops-grid.two,
   .aquatwin-studio .deliverable-grid.compact {
@@ -2446,6 +2571,14 @@
     display: block;
   }
 
+  .aquatwin-studio .model-showcase {
+    grid-template-columns: 1fr;
+  }
+
+  .aquatwin-studio .run-demo-action {
+    width: 100%;
+  }
+
   .aquatwin-studio .institution-lockup {
     display: inline-flex;
     margin-bottom: 12px;
@@ -2464,6 +2597,8 @@
   .aquatwin-studio .lifecycle-steps,
   .aquatwin-studio .model-info-grid,
   .aquatwin-studio .model-inference-grid,
+  .aquatwin-studio .model-insight-row,
+  .aquatwin-studio .model-chart-grid,
   .aquatwin-studio .mlops-grid,
   .aquatwin-studio .mlops-grid.two,
   .aquatwin-studio .deliverable-grid,
