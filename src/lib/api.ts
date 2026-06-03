@@ -4,7 +4,7 @@ import { APP_CONFIG } from "@/config/app"
 
 const client = axios.create({
   baseURL: APP_CONFIG.apiBaseUrl,
-  timeout: 12_000,
+  timeout: 60_000,
 })
 
 function getMessage(error: unknown) {

@@ -39,7 +39,6 @@ import {
 } from "recharts"
 
 import type { ViewContext } from "@/App"
-import { ModelsView } from "@/features/models/ModelsView"
 import { apiGet, apiPost } from "@/lib/api"
 import { pickId, pickName, query, unwrapList, unwrapObject, type Row } from "@/lib/normalize"
 
@@ -49,6 +48,102 @@ type StatusKind = "success" | "warning" | "info" | "danger" | "purple" | "neutra
 const defaultPond = "LEGACY-POND-1"
 const defaultModel = "ML_SUPERVISED_LINEAR_REG"
 const defaultVariables = ["water_temperature_c", "ph", "dissolved_oxygen_mg_l", "nitrate_ion"]
+
+const modelUiCatalog: Record<string, { name: string; family: string; purpose: string; output: string }> = {
+  ML_SUPERVISED_LINEAR_REG: {
+    name: "Regresion lineal de calidad de agua",
+    family: "Supervisado tabular",
+    purpose: "Estima una variable objetivo desde telemetria limpia.",
+    output: "valor continuo",
+  },
+  ML_SUPERVISED_LOGISTIC_REG: {
+    name: "Clasificacion logistica operativa",
+    family: "Supervisado tabular",
+    purpose: "Clasifica estados discretos derivados del target entrenado.",
+    output: "clase 0/1",
+  },
+  ML_NONLINEAR_DECISION_TREE: {
+    name: "Arbol de decision no lineal",
+    family: "Supervisado no lineal",
+    purpose: "Explica reglas simples de prediccion sobre variables del estanque.",
+    output: "valor continuo",
+  },
+  ML_NONLINEAR_RANDOM_FOREST: {
+    name: "Random Forest no lineal",
+    family: "Ensamble supervisado",
+    purpose: "Reduce variacion usando multiples arboles entrenados.",
+    output: "valor continuo",
+  },
+  ML_NONLINEAR_SVM: {
+    name: "SVR / maquina de soporte vectorial",
+    family: "Supervisado no lineal",
+    purpose: "Modela relaciones suaves entre sensores y variable objetivo.",
+    output: "valor continuo",
+  },
+  ML_NONSUPERVISED_KNN: {
+    name: "KNN de respuesta local",
+    family: "Vecinos cercanos",
+    purpose: "Predice por similitud con registros historicos preparados.",
+    output: "valor continuo",
+  },
+  ML_UNSUPERVISED_KMEANS: {
+    name: "K-Means de perfiles de agua",
+    family: "No supervisado",
+    purpose: "Agrupa estados operativos similares del estanque.",
+    output: "cluster",
+  },
+  ML_UNSUPERVISED_PCA: {
+    name: "PCA de reduccion dimensional",
+    family: "No supervisado",
+    purpose: "Resume la variabilidad de sensores en componentes principales.",
+    output: "componente principal",
+  },
+  ML_NONSUPERVISED_SOM: {
+    name: "SOM / mapa autoorganizado",
+    family: "No supervisado",
+    purpose: "Reservado para mapas topologicos de perfiles de monitoreo.",
+    output: "nodo / mapa",
+  },
+  PEARSON_LSTM_ATTENTION_WQ: {
+    name: "Pearson LSTM con atencion",
+    family: "Secuencial",
+    purpose: "Forecast temporal con seleccion Pearson y mecanismo de atencion.",
+    output: "pronostico",
+  },
+  LSTM_TRADITIONAL_WQ: {
+    name: "LSTM tradicional de calidad de agua",
+    family: "Secuencial",
+    purpose: "Forecast temporal de variables fisicoquimicas.",
+    output: "pronostico",
+  },
+  PEARSON_LSTM_BASE: {
+    name: "Pearson LSTM base",
+    family: "Secuencial",
+    purpose: "Forecast con seleccion de variables por correlacion.",
+    output: "pronostico",
+  },
+  BPNN_MEA_FEED_INTAKE: {
+    name: "BPNN-MEA de consumo de alimento",
+    family: "Red neuronal",
+    purpose: "Estima consumo de alimento integrando agua y biomasa.",
+    output: "consumo estimado",
+  },
+}
+
+function modelTitle(modelCode: unknown) {
+  const code = text(modelCode, "")
+  return modelUiCatalog[code]?.name ?? code.replaceAll("_", " ").toLowerCase()
+}
+
+function modelFamily(modelCode: unknown, fallback?: unknown) {
+  const code = text(modelCode, "")
+  return modelUiCatalog[code]?.family ?? text(fallback, "Modelo")
+}
+
+function modelPurpose(modelCode: unknown) {
+  const code = text(modelCode, "")
+  return modelUiCatalog[code]?.purpose ?? "Modelo disponible en el backend."
+}
 
 function row(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {}
@@ -180,19 +275,7 @@ export function MlopsApp({ selectedFarmId, selectedPondId, onFarmChange, onPondC
           {screen === "features" ? <FeaturesView selectedPondId={activePondId} /> : null}
           {screen === "training" ? <TrainingView selectedPondId={activePondId} /> : null}
           {screen === "artifacts" ? <ArtifactsView /> : null}
-          {screen === "models" ? (
-            <>
-              <InferenceView />
-              <div className="module-spacer" />
-              <ModelsView
-                selectedFarmId={activeFarmId}
-                selectedPondId={activePondId}
-                onFarmChange={onFarmChange}
-                onPondChange={onPondChange}
-                embedded
-              />
-            </>
-          ) : null}
+          {screen === "models" ? <ModelLifecycleView selectedPondId={activePondId} /> : null}
           {screen === "traceability" ? <TraceabilityView dashboard={dashboard} /> : null}
         </main>
       </div>
@@ -223,11 +306,13 @@ function MlopsTopBar({
     <header className="topbar">
       <div className="brand">
         <Droplet size={30} />
-        <span>AquaTwin</span>
-        <b>Studio</b>
+        <div className="brand-stack">
+          <strong><span>AquaTwin</span> <b>Studio</b></strong>
+          <small>INICTEL-UNI / PROCIENCIA</small>
+        </div>
       </div>
       <div className={online ? "top-pill status-online" : "top-pill status-offline"}>
-        <span>Backend</span>
+        <span>Backend API</span>
         <strong>{online ? "ONLINE" : "REVISAR"}</strong>
         <i />
       </div>
@@ -252,7 +337,7 @@ function MlopsTopBar({
         <div className="avatar">AP</div>
         <div className="user">
           <strong>Administrador</strong>
-          <span>Consola MLOps</span>
+          <span>INICTEL-UNI PROCIENCIA</span>
         </div>
       </div>
     </header>
@@ -296,9 +381,9 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
     { id: "data", label: "Datos", Icon: Database },
     { id: "cleaning", label: "Limpieza", Icon: Wand2 },
     { id: "features", label: "Features", Icon: Table2 },
-    { id: "training", label: "Entrenamiento", Icon: Brain },
+    { id: "training", label: "Entrenar", Icon: Brain },
     { id: "artifacts", label: "Artefactos", Icon: Boxes },
-    { id: "models", label: "Modelos e inferencia", Icon: Rocket },
+    { id: "models", label: "Modelos ML", Icon: Rocket },
     { id: "traceability", label: "Trazabilidad", Icon: ClipboardList },
   ]
   const metrics = row(dashboard.system_metrics)
@@ -729,7 +814,10 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
 function ArtifactsView() {
   const queryClient = useQueryClient()
   const [modelFilter, setModelFilter] = useState("")
-  const assetsQuery = useQuery({ queryKey: ["model-assets", modelFilter], queryFn: () => apiGet<unknown>(modelFilter ? query("/ml/model-assets", { model_code: modelFilter }) : "/ml/model-assets") })
+  const assetsQuery = useQuery({
+    queryKey: ["model-assets", modelFilter],
+    queryFn: () => apiGet<unknown>(query("/ml/model-assets", { model_code: modelFilter || undefined, include_payload: false })),
+  })
   const assets = rows(assetsQuery.data)
   const activateMutation = useMutation({
     mutationFn: (assetId: string) => apiPost<unknown>(`/ml/model-assets/${assetId}/activate`),
@@ -773,63 +861,219 @@ function ArtifactsView() {
   )
 }
 
-function InferenceView() {
-  const [modelCode, setModelCode] = useState(defaultModel)
-  const assetsQuery = useQuery({ queryKey: ["active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active" })) })
-  const activeAssetQuery = useQuery({ queryKey: ["active-model-asset", modelCode], queryFn: () => apiGet<unknown>(`/models/${modelCode}/asset`), enabled: Boolean(modelCode) })
-  const metricsQuery = useQuery({ queryKey: ["model-metrics", modelCode], queryFn: () => apiGet<unknown>(`/models/${modelCode}/metrics`), enabled: Boolean(modelCode) })
+function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
+  const lifecycleQuery = useQuery({ queryKey: ["ml-lifecycle"], queryFn: () => apiGet<unknown>("/ml/lifecycle/status"), refetchInterval: 30_000 })
+  const trainableQuery = useQuery({ queryKey: ["trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models"), refetchInterval: 30_000 })
+  const assetsQuery = useQuery({ queryKey: ["active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })), refetchInterval: 30_000 })
+  const jobsQuery = useQuery({ queryKey: ["training-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs"), refetchInterval: 30_000 })
+  const featuresQuery = useQuery({ queryKey: ["features"], queryFn: () => apiGet<unknown>("/features"), refetchInterval: 30_000 })
+  const lifecycle = unwrapObject(lifecycleQuery.data)
+  const trainable = rows(trainableQuery.data)
   const activeAssets = rows(assetsQuery.data)
-  const activeModelAsset = unwrapObject(activeAssetQuery.data)
-  const activeAsset = Object.keys(activeModelAsset).length ? activeModelAsset : activeAssets.find((asset) => text(asset.model_code) === modelCode) ?? {}
-  const featureNames = getFeatureNames(activeAsset, metricsQuery.data)
+  const jobs = rows(jobsQuery.data)
+  const featureSets = rows(featuresQuery.data)
+  const [selectedModelCode, setSelectedModelCode] = useState(defaultModel)
+  const selectedAsset = activeAssets.find((asset) => text(asset.model_code, "") === selectedModelCode) ?? {}
+  const selectedTrainable = trainable.find((model) => text(model.model_code, "") === selectedModelCode) ?? {}
+  const selectedJob = jobs.find((job) => text(job.job_id, "") === text(selectedAsset.training_job_id, "")) ?? {}
+  const featureSetId = text(selectedAsset.feature_set_id, "")
+  const previewQuery = useQuery({
+    queryKey: ["model-feature-preview", featureSetId],
+    queryFn: () => apiGet<unknown>(`/features/${featureSetId}/preview`),
+    enabled: Boolean(featureSetId),
+  })
+  const featureNames = getFeatureNames(selectedAsset, selectedAsset.metrics_json)
   const [featureValues, setFeatureValues] = useState<Record<string, string>>({})
   const predictMutation = useMutation({
     mutationFn: () =>
-      apiPost<unknown>(`/models/${modelCode}/predict`, {
+      apiPost<unknown>(`/models/${selectedModelCode}/predict`, {
         features: Object.fromEntries(featureNames.map((name) => [name, Number(featureValues[name] ?? 0)])),
       }),
   })
-  const modelCodes = Array.from(new Set([defaultModel, ...activeAssets.map((asset) => text(asset.model_code, "")).filter(Boolean)]))
-  const hasAsset = Boolean(activeAsset.asset_id || activeAsset.version || activeAsset.status === "active")
+  const modelsToShow = mergeModelRows(trainable, activeAssets)
+  const activeCount = activeAssets.length
+
+  useEffect(() => {
+    if (activeAssets.length && !activeAssets.some((asset) => text(asset.model_code, "") === selectedModelCode)) {
+      setSelectedModelCode(text(activeAssets[0].model_code, defaultModel))
+    }
+  }, [activeAssets, selectedModelCode])
+
+  const loadSample = () => {
+    const sample = row(rows(previewQuery.data)[0])
+    if (!Object.keys(sample).length) return
+    setFeatureValues((current) => {
+      const next = { ...current }
+      featureNames.forEach((name) => {
+        next[name] = text(sample[name], "0")
+      })
+      return next
+    })
+  }
 
   return (
-    <section className="studio-card mlops-card">
-      <div className="card-head">
+    <>
+      <section className="page-head model-page-head">
         <div>
-          <h2>INFERENCIA ML CON ARTEFACTO ACTIVO</h2>
-          <p className="soft">Si no hay asset activo, el boton de prediccion queda bloqueado.</p>
+          <h1>MODELOS ML EN OPERACION</h1>
+          <p>Ciclo completo por modelo: datos, limpieza, preparacion, entrenamiento, artefacto activo, inferencia y trazabilidad. Estanque activo: {selectedPondId}.</p>
         </div>
-        <Badge kind={hasAsset ? "success" : "warning"}>{hasAsset ? "Asset activo" : "Entrene o active un artefacto"}</Badge>
-      </div>
-      <ErrorNote error={assetsQuery.error ?? activeAssetQuery.error ?? metricsQuery.error ?? predictMutation.error} />
-      <div className="mlops-grid two">
-        <div>
-          <NativeSelect label="Modelo" value={modelCode} options={modelCodes} onChange={setModelCode} />
-          <MetricList rows={[["Asset", activeAsset.asset_id], ["Version", activeAsset.version], ["Estado", activeAsset.status], ["Feature set", activeAsset.feature_set_id]]} />
-          <div className="field-grid">
-            {featureNames.map((name) => (
-              <label className="form-line" key={name}>
-                <span>{name}</span>
-                <input value={featureValues[name] ?? ""} placeholder="0" onChange={(event) => setFeatureValues((current) => ({ ...current, [name]: event.target.value }))} />
-              </label>
-            ))}
+        <div className="institution-lockup">INICTEL-UNI · PROCIENCIA</div>
+      </section>
+      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? previewQuery.error ?? predictMutation.error} />
+      <section className="kpi-grid lifecycle-kpis">
+        <Kpi icon={<Database />} label="Limpiezas" value={text(lifecycle.cleaning_enabled ? rowsCountHint(lifecycle, "cleaning") : "0")} note="datos trazables" />
+        <Kpi icon={<Table2 />} label="Feature sets" value={text(lifecycle.total_feature_sets, "0")} note={`${featureSets.length} listados`} color="green" />
+        <Kpi icon={<Brain />} label="Entrenamientos" value={text(lifecycle.total_training_jobs, "0")} note="jobs registrados" color="purple" />
+        <Kpi icon={<Boxes />} label="Activos" value={String(activeCount)} note="modelos productivos" color="amber" />
+        <Kpi icon={<Rocket />} label="Inferencia" value={text(lifecycle.model_assets_enabled ? "ON" : "OFF")} note="con trazabilidad" />
+      </section>
+      <section className="model-lifecycle-layout">
+        <div className="studio-card model-list-panel">
+          <div className="card-head">
+            <div>
+              <h2>CATALOGO DE MODELOS</h2>
+              <p className="soft">Seleccione un modelo para ver su vida completa.</p>
+            </div>
+            <Badge kind="success">{activeCount} activos</Badge>
           </div>
-          <button type="button" className="primary-action" disabled={!hasAsset || predictMutation.isPending || !featureNames.length} onClick={() => predictMutation.mutate()}>
-            <Rocket size={16} /> {predictMutation.isPending ? "Prediciendo" : "Predecir"}
-          </button>
+          <div className="model-card-list">
+            {modelsToShow.map((model) => {
+              const code = text(model.model_code, "")
+              const asset = activeAssets.find((item) => text(item.model_code, "") === code)
+              const isActive = Boolean(asset)
+              return (
+                <button key={code} type="button" className={selectedModelCode === code ? "model-life-card active" : "model-life-card"} onClick={() => setSelectedModelCode(code)}>
+                  <div>
+                    <strong>{modelTitle(code)}</strong>
+                    <span>{code}</span>
+                  </div>
+                  <Badge kind={isActive ? "success" : statusKind(model.lifecycle_status)}>{isActive ? "Activo" : text(model.lifecycle_status, "Pendiente")}</Badge>
+                  <p>{modelPurpose(code)}</p>
+                  <small>{modelFamily(code, model.family)} · salida: {modelUiCatalog[code]?.output ?? "resultado"}</small>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div>
-          <h3>Resultado</h3>
-          <MetricList rows={[["Prediction", row(predictMutation.data).prediction], ["Asset usado", row(predictMutation.data).asset_id], ["Version", row(predictMutation.data).version]]} />
-          <JsonButton label="Traceability" value={row(predictMutation.data).traceability ?? predictMutation.data ?? activeAsset} />
+        <div className="model-detail-stack">
+          <section className="studio-card mlops-card model-detail-card">
+            <div className="card-head">
+              <div>
+                <h2>{modelTitle(selectedModelCode)}</h2>
+                <p className="soft">{selectedModelCode}</p>
+              </div>
+              <Badge kind={selectedAsset.asset_id ? "success" : "warning"}>{selectedAsset.asset_id ? "Artefacto activo" : "Sin artefacto activo"}</Badge>
+            </div>
+            <div className="lifecycle-steps">
+              <LifecycleStep number="1" title="Datos" status={selectedTrainable.required_variables ? "ready" : "pending"} detail={formatRequiredVariables(selectedTrainable.required_variables)} />
+              <LifecycleStep number="2" title="Limpieza" status="ready" detail="Datos versionados por cleaning run." />
+              <LifecycleStep number="3" title="Preparacion" status={featureSetId ? "ready" : "pending"} detail={featureSetId || "Cree un feature set para este modelo."} />
+              <LifecycleStep number="4" title="Entrenamiento" status={selectedJob.status ?? selectedAsset.training_job_id} detail={text(selectedAsset.training_job_id, "Sin job asociado")} />
+              <LifecycleStep number="5" title="Produccion" status={selectedAsset.status} detail={text(selectedAsset.asset_id, "Sin asset activo")} />
+            </div>
+            <section className="model-info-grid">
+              <div>
+                <h3>Metricas del modelo</h3>
+                <MetricList rows={metricRows(selectedAsset.metrics_json ?? selectedJob.metrics)} />
+              </div>
+              <div>
+                <h3>Trazabilidad del artefacto</h3>
+                <MetricList rows={[["Version", selectedAsset.version], ["Feature set", selectedAsset.feature_set_id], ["Training job", selectedAsset.training_job_id], ["Activado", selectedAsset.activated_at]]} />
+              </div>
+            </section>
+          </section>
+          <section className="studio-card mlops-card model-detail-card">
+            <div className="card-head">
+              <div>
+                <h2>INFERENCIA GUIADA</h2>
+                <p className="soft">Use una muestra real del feature set o escriba valores manuales.</p>
+              </div>
+              <button type="button" className="mini-btn mini-btn-primary" disabled={!featureSetId || !rows(previewQuery.data).length} onClick={loadSample}>
+                Cargar muestra
+              </button>
+            </div>
+            <div className="model-inference-grid">
+              <div className="field-grid">
+                {featureNames.map((name) => (
+                  <label className="form-line" key={name}>
+                    <span>{name}</span>
+                    <input value={featureValues[name] ?? ""} placeholder="0" onChange={(event) => setFeatureValues((current) => ({ ...current, [name]: event.target.value }))} />
+                  </label>
+                ))}
+              </div>
+              <div className="prediction-panel">
+                <button type="button" className="primary-action" disabled={!selectedAsset.asset_id || predictMutation.isPending || !featureNames.length} onClick={() => predictMutation.mutate()}>
+                  <Rocket size={16} /> {predictMutation.isPending ? "Prediciendo" : "Ejecutar modelo"}
+                </button>
+                <MetricList rows={[["Resultado", row(predictMutation.data).prediction], ["Prediccion ID", row(row(predictMutation.data).traceability).prediction_id], ["Asset usado", row(predictMutation.data).asset_id]]} />
+                <JsonButton label="Trazabilidad de inferencia" value={row(predictMutation.data).traceability ?? predictMutation.data ?? selectedAsset} />
+              </div>
+            </div>
+          </section>
         </div>
+      </section>
+    </>
+  )
+}
+
+function mergeModelRows(trainable: Row[], activeAssets: Row[]) {
+  const byCode = new Map<string, Row>()
+  trainable.forEach((item) => byCode.set(text(item.model_code, ""), item))
+  activeAssets.forEach((asset) => {
+    const code = text(asset.model_code, "")
+    byCode.set(code, { ...byCode.get(code), ...asset, lifecycle_status: "active" })
+  })
+  return Array.from(byCode.values()).filter((item) => text(item.model_code, ""))
+}
+
+function rowsCountHint(lifecycle: Row, key: string) {
+  if (key === "cleaning") return lifecycle.cleaning_enabled ? "ON" : "OFF"
+  return "-"
+}
+
+function formatRequiredVariables(value: unknown) {
+  return Array.isArray(value) && value.length ? value.map(String).join(", ") : "Variables segun contrato del modelo."
+}
+
+function metricRows(value: unknown): [string, unknown][] {
+  const metrics = row(value)
+  const entries = Object.entries(metrics)
+  if (!entries.length) return [["Estado", "Sin metricas publicadas"]]
+  return entries.slice(0, 6).map(([key, metric]) => [metricLabel(key), metric])
+}
+
+function metricLabel(key: string) {
+  const labels: Record<string, string> = {
+    mse: "MSE",
+    rmse: "RMSE",
+    mae: "MAE",
+    r2: "R2",
+    accuracy: "Accuracy",
+    inertia: "Inercia",
+    explained_variance_ratio_0: "Varianza PC1",
+    explained_variance_ratio_total: "Varianza total",
+  }
+  return labels[key] ?? key
+}
+
+function LifecycleStep({ number, title, status, detail }: { number: string; title: string; status: unknown; detail: string }) {
+  const kind = statusKind(status)
+  return (
+    <div className={`lifecycle-step lifecycle-step-${kind}`}>
+      <span>{number}</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{detail}</p>
       </div>
-    </section>
+      <Badge kind={kind}>{text(status, "pendiente")}</Badge>
+    </div>
   )
 }
 
 function getFeatureNames(asset: Row, metricsData: unknown) {
-  const fromAsset = asset.feature_names ?? row(asset.metrics_json).feature_names ?? row(asset.metadata).feature_names
+  const artifactPayload = row(asset.artifact_payload)
+  const fromAsset = asset.feature_names ?? artifactPayload.feature_names ?? row(asset.metrics_json).feature_names ?? row(asset.metadata).feature_names
   if (Array.isArray(fromAsset)) return fromAsset.map(String)
   const fromMetrics = row(metricsData).feature_names
   if (Array.isArray(fromMetrics)) return fromMetrics.map(String)
@@ -838,7 +1082,7 @@ function getFeatureNames(asset: Row, metricsData: unknown) {
 
 function TraceabilityView({ dashboard }: { dashboard: Row }) {
   const jobsQuery = useQuery({ queryKey: ["training-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs") })
-  const assetsQuery = useQuery({ queryKey: ["model-assets"], queryFn: () => apiGet<unknown>("/ml/model-assets") })
+  const assetsQuery = useQuery({ queryKey: ["model-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { include_payload: false })) })
   const runs = rows(dashboard.traceability)
   const jobs = rows(jobsQuery.data)
   const assets = rows(assetsQuery.data)

@@ -208,6 +208,26 @@
   color: var(--at-primary);
 }
 
+.aquatwin-studio .brand-stack {
+  display: grid;
+  gap: 2px;
+  line-height: 1;
+}
+
+.aquatwin-studio .brand-stack strong {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 26px;
+}
+
+.aquatwin-studio .brand-stack small {
+  color: #5f728c;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
 .aquatwin-studio .brand b {
   margin-left: 2px;
   color: #1597ff;
@@ -2135,6 +2155,184 @@
   background: #94a3b8;
 }
 
+.aquatwin-studio .model-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.aquatwin-studio .institution-lockup {
+  flex: 0 0 auto;
+  border: 1px solid #bee3ff;
+  border-radius: 12px;
+  background: #f1f9ff;
+  color: #0759b8;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 10px 12px;
+}
+
+.aquatwin-studio .lifecycle-kpis {
+  margin-bottom: 14px;
+}
+
+.aquatwin-studio .model-lifecycle-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.aquatwin-studio .model-list-panel,
+.aquatwin-studio .model-detail-card {
+  min-width: 0;
+  padding: 14px;
+}
+
+.aquatwin-studio .model-card-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.aquatwin-studio .model-life-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dfeaf7;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #16283f;
+  padding: 12px;
+  text-align: left;
+}
+
+.aquatwin-studio .model-life-card:hover,
+.aquatwin-studio .model-life-card.active {
+  border-color: #87c7ff;
+  background: #f3f9ff;
+  box-shadow: 0 8px 22px rgba(25, 118, 255, 0.08);
+}
+
+.aquatwin-studio .model-life-card > div {
+  display: grid;
+  gap: 3px;
+}
+
+.aquatwin-studio .model-life-card strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.aquatwin-studio .model-life-card span,
+.aquatwin-studio .model-life-card small {
+  overflow-wrap: anywhere;
+  color: var(--at-muted);
+  font-size: 11px;
+}
+
+.aquatwin-studio .model-life-card p {
+  margin: 0;
+  color: #41536d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.aquatwin-studio .model-life-card .at-badge {
+  justify-self: start;
+}
+
+.aquatwin-studio .model-detail-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.aquatwin-studio .lifecycle-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.aquatwin-studio .lifecycle-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 112px;
+  border: 1px solid var(--at-border);
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.aquatwin-studio .lifecycle-step > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  background: #eaf3ff;
+  color: var(--at-primary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.aquatwin-studio .lifecycle-step strong {
+  display: block;
+  color: #18314f;
+  font-size: 12px;
+}
+
+.aquatwin-studio .lifecycle-step p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: #52657b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.aquatwin-studio .lifecycle-step .at-badge {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.aquatwin-studio .lifecycle-step-success {
+  border-color: #b9eccd;
+  background: #f4fbf7;
+}
+
+.aquatwin-studio .lifecycle-step-warning {
+  border-color: #f7d79a;
+  background: #fffaf0;
+}
+
+.aquatwin-studio .model-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.aquatwin-studio .model-inference-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.36fr);
+  gap: 12px;
+}
+
+.aquatwin-studio .prediction-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--at-border);
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: 12px;
+}
+
 @media (max-width: 1520px) {
   .aquatwin-studio .top-pill.select-pill {
     min-width: 170px;
@@ -2145,6 +2343,7 @@
   }
 
   .aquatwin-studio .models-layout,
+  .aquatwin-studio .model-lifecycle-layout,
   .aquatwin-studio .runner-grid,
   .aquatwin-studio .runner-bottom-grid,
   .aquatwin-studio .bottom-grid,
@@ -2222,6 +2421,7 @@
   .aquatwin-studio .workflow-bar,
   .aquatwin-studio .explain-row,
   .aquatwin-studio .inspector-content,
+  .aquatwin-studio .lifecycle-steps,
   .aquatwin-studio .mlops-grid,
   .aquatwin-studio .mlops-grid.two,
   .aquatwin-studio .deliverable-grid.compact {
@@ -2238,6 +2438,19 @@
     font-size: 21px;
   }
 
+  .aquatwin-studio .brand-stack strong {
+    font-size: 21px;
+  }
+
+  .aquatwin-studio .model-page-head {
+    display: block;
+  }
+
+  .aquatwin-studio .institution-lockup {
+    display: inline-flex;
+    margin-bottom: 12px;
+  }
+
   .aquatwin-studio .top-pill,
   .aquatwin-studio .select-pill {
     width: 100%;
@@ -2248,6 +2461,9 @@
   .aquatwin-studio .workflow-bar,
   .aquatwin-studio .explain-row,
   .aquatwin-studio .inspector-content,
+  .aquatwin-studio .lifecycle-steps,
+  .aquatwin-studio .model-info-grid,
+  .aquatwin-studio .model-inference-grid,
   .aquatwin-studio .mlops-grid,
   .aquatwin-studio .mlops-grid.two,
   .aquatwin-studio .deliverable-grid,

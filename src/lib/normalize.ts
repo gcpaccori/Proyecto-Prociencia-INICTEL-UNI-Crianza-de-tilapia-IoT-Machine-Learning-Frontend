@@ -57,10 +57,10 @@ export function objectList(value: unknown) {
   return []
 }
 
-export function query(endpoint: string, params: Record<string, string | undefined>) {
+export function query(endpoint: string, params: Record<string, string | number | boolean | undefined | null>) {
   const search = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
-    if (value) search.set(key, value)
+    if (value !== undefined && value !== null && value !== "") search.set(key, String(value))
   })
   const suffix = search.toString()
   return suffix ? `${endpoint}?${suffix}` : endpoint
