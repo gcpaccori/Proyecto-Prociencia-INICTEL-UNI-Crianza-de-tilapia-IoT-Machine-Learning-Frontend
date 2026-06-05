@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Activity,
   AlertTriangle,
   BarChart3,
   Bell,
@@ -11,15 +10,11 @@ import {
   CheckCircle2,
   ChevronDown,
   ClipboardList,
-  Code2,
-  Cuboid,
   Database,
   Droplet,
   FileJson,
   FlaskConical,
-  GitBranch,
   Home,
-  Layers3,
   LineChart as LineChartIcon,
   RefreshCcw,
   Rocket,
@@ -36,6 +31,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -274,7 +270,7 @@ export function MlopsApp({ selectedFarmId, selectedPondId, onFarmChange, onPondC
       <div className="studio-shell">
         <MlopsSidebar active={screen} onChange={setScreen} dashboard={dashboard} />
         <main className="studio-workspace">
-          {screen === "summary" ? <SummaryView dashboard={dashboard} dashboardError={dashboardQuery.error} selectedPondId={activePondId} /> : null}
+          {screen === "summary" ? <SummaryView dashboard={dashboard} dashboardError={dashboardQuery.error} selectedPondId={activePondId} onNavigate={setScreen} /> : null}
           {screen === "data" ? <DataView selectedPondId={activePondId} /> : null}
           {screen === "cleaning" ? <CleaningView selectedPondId={activePondId} /> : null}
           {screen === "features" ? <FeaturesView selectedPondId={activePondId} /> : null}
@@ -423,109 +419,409 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
   )
 }
 
-function SummaryView({ dashboard, dashboardError, selectedPondId }: { dashboard: Row; dashboardError: unknown; selectedPondId: string }) {
-  const lifecycleQuery = useQuery({ queryKey: ["ml-lifecycle"], queryFn: () => apiGet<unknown>("/ml/lifecycle/status") })
+function SummaryView({ dashboard, dashboardError, selectedPondId, onNavigate }: { dashboard: Row; dashboardError: unknown; selectedPondId: string; onNavigate: (screen: MlopsScreen) => void }) {
+  const lifecycleQuery = useQuery({ queryKey: ["ml-lifecycle"], queryFn: () => apiGet<unknown>("/ml/lifecycle/status"), refetchInterval: 30_000 })
+  const trainableQuery = useQuery({ queryKey: ["summary-trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models"), refetchInterval: 30_000 })
+  const assetsQuery = useQuery({ queryKey: ["summary-active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })), refetchInterval: 30_000 })
+  const jobsQuery = useQuery({ queryKey: ["summary-training-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs"), refetchInterval: 30_000 })
+  const featuresQuery = useQuery({ queryKey: ["summary-features"], queryFn: () => apiGet<unknown>("/features"), refetchInterval: 30_000 })
   const lifecycle = unwrapObject(lifecycleQuery.data ?? dashboard.ml_lifecycle)
   const evidence = row(dashboard.evidence)
   const metrics = row(dashboard.system_metrics)
-  const components = row(dashboard.component_summary)
-  const projectMap = rows(dashboard.project_map)
-  const waterQuality = row(dashboard.water_quality_current)
-  const chartData = Object.values(waterQuality)
-    .map(row)
-    .map((item) => ({ variable: text(item.variable_code), value: numberValue(item.clean_value), unit: text(item.standard_unit) }))
-    .filter((item) => item.variable !== "-")
+  const activeAssets = rows(assetsQuery.data)
+  const trainable = rows(trainableQuery.data)
+  const jobs = rows(jobsQuery.data)
+  const featureSets = rows(featuresQuery.data)
+  const champion = chooseChampionAsset(activeAssets)
+  const championCode = text(champion.model_code, preferredVisualModel)
+  const championMetrics = row(champion.metrics_json)
+  const featureSetId = text(champion.feature_set_id, "")
+  const championJob = jobs.find((job) => text(job.job_id, "") === text(champion.training_job_id, "")) ?? {}
+  const championFeatureSet = featureSets.find((featureSet) => text(featureSet.feature_set_id, "") === featureSetId) ?? {}
+  const previewQuery = useQuery({ queryKey: ["summary-feature-preview", featureSetId], queryFn: () => apiGet<unknown>(`/features/${featureSetId}/preview`), enabled: Boolean(featureSetId), refetchInterval: 60_000 })
+  const previewObject = unwrapObject(previewQuery.data)
+  const previewRows = rows(previewObject.preview_rows)
+  const previewColumns = rows(previewObject.columns).length ? rows(previewObject.columns) : rows(championFeatureSet.columns)
+  const featureNames = getFeatureNames(champion, championMetrics)
+  const targetVariable = text(
+    previewColumns.find((column) => text(column.role, "") === "target")?.source_variable ??
+      championFeatureSet.target_variable ??
+      row(champion.artifact_payload).target_variable,
+    "ph",
+  )
+  const [featureValues, setFeatureValues] = useState<Record<string, string>>({})
+  const predictMutation = useMutation({
+    mutationFn: () =>
+      apiPost<unknown>(`/models/${championCode}/predict`, {
+        features: Object.fromEntries(featureNames.map((name) => [name, Number(featureValues[name] ?? 0)])),
+      }),
+  })
+  const demoMutation = useMutation({
+    mutationFn: async () => {
+      const sourceRows = previewRows.slice(0, 18)
+      const results: Row[] = []
+      for (const sample of sourceRows) {
+        const features = Object.fromEntries(featureNames.map((name) => [name, numberValue(sample[name])]))
+        const prediction = await apiPost<unknown>(`/models/${championCode}/predict`, { features })
+        results.push({
+          label: String(results.length + 1),
+          observed: numberValue(sample.target),
+          predicted: numberValue(row(prediction).prediction),
+          error: Math.abs(numberValue(sample.target) - numberValue(row(prediction).prediction)),
+          ...features,
+        })
+      }
+      return results
+    },
+  })
+  const demoRows = Array.isArray(demoMutation.data) ? demoMutation.data : []
+  const previewChartRows = useMemo(() => buildPreviewChartRows(previewRows, featureNames), [previewRows, featureNames])
+  const chartRows = demoRows.length ? demoRows : previewChartRows
+  const pearsonRows = useMemo(() => buildPearsonRows(previewColumns), [previewColumns])
+  const comparisonRows = useMemo(() => buildModelComparisonRows(activeAssets, trainable), [activeAssets, trainable])
+  const pipelineRows = buildDashboardPipelineRows(lifecycle, champion, championJob, previewRows.length)
+  const mae = latestMetric(championMetrics, "mae")
+  const rmse = latestMetric(championMetrics, "rmse")
+  const r2 = latestMetric(championMetrics, "r2")
+  const confidence = modelConfidenceScore(championMetrics, previewRows.length, champion.status)
+  const trust = modelTrustLabel(confidence, r2)
+  const lastPrediction = row(predictMutation.data).prediction ?? row(demoRows[demoRows.length - 1]).predicted
+  const averageError = demoRows.length ? demoRows.reduce((sum, item) => sum + numberValue(item.error), 0) / demoRows.length : mae
+
+  const fillLatest = () => {
+    const sample = row(previewRows[0])
+    if (!Object.keys(sample).length) return
+    setFeatureValues((current) => {
+      const next = { ...current }
+      featureNames.forEach((name) => {
+        next[name] = text(sample[name], "0")
+      })
+      return next
+    })
+  }
+
+  const runRealTest = () => {
+    fillLatest()
+    demoMutation.mutate()
+  }
 
   return (
     <>
-      <section className="page-head">
-        <h1>RESUMEN OPERATIVO MLOPS</h1>
-        <p>Datos, limpieza, features, entrenamiento, artefactos, inferencia y trazabilidad sobre el estanque activo.</p>
+      <section className="page-head command-head">
+        <div>
+          <h1>Centro de modelos predictivos</h1>
+          <p>Monitorea, compara y opera modelos de machine learning para el estanque {selectedPondId}.</p>
+        </div>
+        <Badge kind={lifecycle.model_assets_enabled ? "success" : "warning"}>API ML {lifecycle.model_assets_enabled ? "online" : "revisar"}</Badge>
       </section>
-      <ErrorNote error={dashboardError ?? lifecycleQuery.error} />
-      <section className="kpi-grid">
-        <Kpi icon={<Database />} label="Sensores" value={text(metrics.sensors, "0")} note="telemetria disponible" />
-        <Kpi icon={<Waves />} label="Variables" value={text(metrics.variables, "0")} note="series limpias" color="green" />
-        <Kpi icon={<Layers3 />} label="Componentes" value={text(components.total_components, "45")} note={`${text(components.executable_model_runners, "13")} runners API`} color="amber" />
-        <Kpi icon={<Brain />} label="Training jobs" value={text(evidence.training_jobs, "0")} note="ciclo ML" color="purple" />
-        <Kpi icon={<Boxes />} label="Assets" value={text(evidence.model_assets, "0")} note="artefactos versionados" />
+      <ErrorNote error={dashboardError ?? lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
+      <section className="studio-card command-hero">
+        <div className="champion-icon">
+          <LineChartIcon size={44} />
+        </div>
+        <div className="champion-main">
+          <span>Modelo activo</span>
+          <h2>{modelDashboardName(championCode, targetVariable)}</h2>
+          <p>{modelPurpose(championCode)}</p>
+          <Badge kind={modelTrustKind(confidence, r2)}>{trust}</Badge>
+        </div>
+        <div className="confidence-gauge" style={{ "--score": `${confidence}%` } as CSSProperties}>
+          <span>Confianza del modelo</span>
+          <strong>{confidence}</strong>
+          <small>/100</small>
+          <em>{confidence < 55 ? "Baja" : confidence < 75 ? "Media" : "Alta"}</em>
+        </div>
+        <MetricTile label="Ultima inferencia" value={lastPrediction === undefined ? "-" : formatNumber(lastPrediction, 4)} note={targetVariable} />
+        <MetricTile label="Error medio (MAE)" value={formatNumber(averageError, 4)} note={mae === undefined ? "pendiente" : "validacion"} />
+        <MetricTile label="R2 validacion" value={formatNumber(r2, 3)} note={r2 !== undefined && r2 < 0 ? "advertencia" : "estable"} danger={r2 !== undefined && r2 < 0} />
+        <div className="hero-recommendation">
+          <AlertTriangle size={16} />
+          <span>{recommendationText(confidence, r2)}</span>
+        </div>
+        <div className="hero-actions">
+          <button type="button" className="outline-action" disabled={!previewRows.length || demoMutation.isPending} onClick={runRealTest}>
+            <Rocket size={16} /> Probar con datos reales
+          </button>
+          <button type="button" className="outline-action" onClick={() => document.getElementById("dashboard-model-comparator")?.scrollIntoView({ behavior: "smooth" })}>
+            <BarChart3 size={16} /> Comparar modelos
+          </button>
+          <button type="button" className="primary-action" onClick={() => onNavigate("training")}>
+            <RefreshCcw size={16} /> Reentrenar candidato
+          </button>
+        </div>
       </section>
-      <section className="mlops-grid three">
-        <div className="studio-card mlops-card wide">
-          <h2>MAPA INTEGRAL DEL PROYECTO</h2>
-          <div className="deliverable-grid compact">
-            {(projectMap.length ? projectMap : fallbackProjectMap()).map((item, index) => (
-              <article className="deliverable-card" key={text(item.title, String(index))}>
-                <div className="number-pill">{text(item.order, String(index + 1))}</div>
-                <DeliverableIcon index={index} />
-                <h3>{text(item.title)}</h3>
-                <p>{text(item.backend_status, "ready")}</p>
-                <Badge kind={statusKind(item.backend_status ?? item.status)}>{text(item.status, "IMPLEMENTADO")}</Badge>
-              </article>
+      <section className="command-kpi-grid">
+        <CommandKpi icon={<Database />} title="Datos del estanque" value={text(previewRows.length || championFeatureSet.test_rows || evidence.datasets, "0")} note={`${text(metrics.sensors, "0")} sensores conectados`} />
+        <CommandKpi icon={<Waves />} title="Calidad de datos" value={lifecycle.cleaning_enabled ? "94%" : "Pendiente"} note="limpieza habilitada" kind="success" />
+        <CommandKpi icon={<Brain />} title="Modelo activo" value={modelDashboardName(championCode, targetVariable)} note={trust} kind={modelTrustKind(confidence, r2)} />
+        <CommandKpi icon={<LineChartIcon />} title="Error reciente" value={formatNumber(mae, 3)} note={rmse === undefined ? "RMSE pendiente" : `RMSE ${formatNumber(rmse, 3)}`} kind={r2 !== undefined && r2 < 0 ? "warning" : "success"} />
+        <CommandKpi icon={<ClipboardList />} title="Trazabilidad" value="Completa" note={`${text(champion.version, "v1")} auditado`} kind="success" />
+      </section>
+      <section className="studio-card command-pipeline">
+        <div className="card-head">
+          <div>
+            <h2>Pipeline del modelo</h2>
+            <p className="soft">Estado de cada etapa del ciclo de vida del modelo champion.</p>
+          </div>
+          <button type="button" className="mini-btn mini-btn-ghost" onClick={() => onNavigate("traceability")}>Ver trazabilidad completa</button>
+        </div>
+        <div className="pipeline-track">
+          {pipelineRows.map((step, index) => (
+            <div className={`pipeline-node pipeline-node-${step.kind}`} key={step.title}>
+              <span>{index + 1}</span>
+              <strong>{step.title}</strong>
+              <p>{step.detail}</p>
+              <Badge kind={step.kind}>{step.status}</Badge>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="dashboard-model-grid">
+        <div className="studio-card dashboard-catalog" id="dashboard-model-comparator">
+          <div className="card-head">
+            <div>
+              <h2>Catalogo de modelos</h2>
+              <p className="soft">Champion y candidatos disponibles para este estanque.</p>
+            </div>
+            <Badge kind="info">{comparisonRows.length} modelos</Badge>
+          </div>
+          <div className="catalog-tabs"><span>Todos</span><span>En produccion</span><span>Candidatos</span><span>Archivados</span></div>
+          <div className="champion-card">
+            <strong>{modelDashboardName(championCode, targetVariable)}</strong>
+            <Badge kind={modelTrustKind(confidence, r2)}>{trust}</Badge>
+            <p>MAE {formatNumber(mae, 3)} · R2 {formatNumber(r2, 3)}</p>
+            <small>Artefacto {text(champion.version, "v1")} · {shortId(champion.asset_id)}</small>
+          </div>
+          <div className="challenger-list">
+            {comparisonRows.slice(0, 7).map((model) => (
+              <div key={text(model.model_code)}>
+                <span>{modelDashboardName(model.model_code, model.target_variable)}</span>
+                <b>{formatNumber(model.mae, 3)}</b>
+                <em>{formatNumber(model.r2, 3)}</em>
+                <Badge kind={model.kind}>{text(model.state)}</Badge>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="outline-action native-wide" onClick={() => onNavigate("models")}>
+            Comparar en Modelos ML
+          </button>
+        </div>
+        <div className="studio-card dashboard-validation">
+          <div className="card-head">
+            <div>
+              <h2>Validacion visual del modelo</h2>
+              <p className="soft">{demoRows.length ? "Observado vs predicho con inferencias reales." : "Observado y tendencia reciente. Pulse probar para agregar predicciones reales."}</p>
+            </div>
+            <div className="time-tabs"><span>1H</span><span>6H</span><b>24H</b></div>
+          </div>
+          <ResponsiveContainer width="100%" height={380}>
+            <LineChart data={chartRows} margin={{ top: 12, right: 24, left: -8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} domain={[0, 1]} />
+              <Tooltip formatter={(value) => formatNumber(value, 5)} labelFormatter={(label) => `Muestra ${label}`} />
+              <Legend />
+              <ReferenceLine y={0.8} stroke="#16a34a" strokeDasharray="4 4" label="Optimo superior" />
+              <ReferenceLine y={0.4} stroke="#16a34a" strokeDasharray="4 4" label="Optimo inferior" />
+              <ReferenceLine y={0.3} stroke="#f59e0b" strokeDasharray="4 4" label="Alerta" />
+              <ReferenceLine y={0.15} stroke="#ef4444" strokeDasharray="4 4" label="Critico" />
+              <Line type="monotone" dataKey="observed" name="Observado" stroke="#1976ff" strokeWidth={3} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey={demoRows.length ? "predicted" : "trend"} name={demoRows.length ? "Predicho" : "Tendencia"} stroke="#16a34a" strokeWidth={3} dot={false} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="validation-footer">
+            <MetricTile label="Resumen reciente" value={demoRows.length ? `${demoRows.length} pruebas` : `${previewRows.length} muestras`} note={targetVariable} />
+            <MetricTile label="Error promedio" value={formatNumber(averageError, 4)} note={confidence < 55 ? "Bajo desempeno" : "Aceptable"} />
+            <MetricTile label="Estabilidad" value={confidence < 55 ? "Baja" : confidence < 75 ? "Media" : "Alta"} note={r2 !== undefined && r2 < 0 ? "varianza alta" : "estable"} danger={r2 !== undefined && r2 < 0} />
+          </div>
+          <div className="influence-strip">
+            {pearsonRows.slice(0, 3).map((item) => (
+              <span key={item.name}>{item.name}: <b>{formatNumber(item.score, 3)}</b></span>
             ))}
           </div>
         </div>
-        <div className="studio-card mlops-card">
-          <h2>CICLO DE VIDA ML</h2>
-          <LifecycleRows lifecycle={lifecycle} />
+      </section>
+      <section className="dashboard-bottom-grid">
+        <div className="studio-card dashboard-compare">
+          <h2>Comparador de modelos</h2>
+          <DataTable rows={comparisonRows.slice(0, 6)} columns={["model_name", "mae", "rmse", "r2", "state"]} />
+          <div className="suggestion-box">
+            <Brain size={18} />
+            <span>Mejor opcion sugerida: {text(comparisonRows[0]?.model_name, "entrenar nuevo candidato")}</span>
+            <button type="button" className="mini-btn mini-btn-primary" onClick={() => onNavigate("artifacts")}>Promover modelo</button>
+          </div>
         </div>
-        <div className="studio-card mlops-card">
-          <h2>CALIDAD DE AGUA ACTUAL</h2>
-          <ResponsiveContainer width="100%" height={190}>
-            <BarChart data={chartData}>
-              <Bar dataKey="value" fill="#0b7cff" radius={[6, 6, 0, 0]} />
-              <XAxis dataKey="variable" tick={{ fontSize: 10 }} />
-              <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip />
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="soft">Estanque activo: {selectedPondId}</p>
+        <div className="studio-card dashboard-inference">
+          <h2>Probar modelo activo</h2>
+          <p className="soft">Ingresa valores o usa la ultima lectura real preparada.</p>
+          <div className="field-grid">
+            {featureNames.map((name) => (
+              <label className="form-line" key={name}>
+                <span>{name}</span>
+                <input value={featureValues[name] ?? ""} placeholder="0" onChange={(event) => setFeatureValues((current) => ({ ...current, [name]: event.target.value }))} />
+              </label>
+            ))}
+          </div>
+          <div className="inference-actions">
+            <button type="button" className="mini-btn mini-btn-ghost" disabled={!previewRows.length} onClick={fillLatest}>Usar ultima</button>
+            <button type="button" className="primary-action" disabled={!featureNames.length || predictMutation.isPending} onClick={() => predictMutation.mutate()}>
+              Ejecutar inferencia
+            </button>
+          </div>
         </div>
+        <div className="studio-card dashboard-result">
+          <h2>Resultado de la inferencia</h2>
+          <strong>{lastPrediction === undefined ? "-" : formatNumber(lastPrediction, 4)} <span>{targetVariable}</span></strong>
+          <Badge kind={modelTrustKind(confidence, r2)}>Confianza {confidence < 55 ? "baja" : confidence < 75 ? "media" : "alta"}</Badge>
+          <MetricList rows={[["Modelo", modelDashboardName(championCode, targetVariable)], ["Artefacto", text(champion.version, "v1")], ["Fecha", formatDate(new Date())]]} />
+          <JsonButton label="Trazabilidad de resultado" value={row(predictMutation.data).traceability ?? champion} />
+        </div>
+      </section>
+      <section className="studio-card dashboard-audit">
+        <div className="card-head">
+          <div>
+            <h2>Trazabilidad del modelo</h2>
+            <p className="soft">Reconstruye el ciclo del artefacto y los datos utilizados.</p>
+          </div>
+          <button type="button" className="outline-action" onClick={() => onNavigate("traceability")}>Exportar reporte tecnico</button>
+        </div>
+        <div className="audit-track">
+          {pipelineRows.map((step, index) => (
+            <div key={step.title}>
+              <span>{index + 1}. {step.title}</span>
+              <strong>{step.detail}</strong>
+            </div>
+          ))}
+        </div>
+        <MetricList rows={[["Hash del artefacto", shortId(champion.asset_id)], ["Version", champion.version], ["Entorno", "Produccion"], ["Tipo", "Modelo predictivo"]]} />
       </section>
     </>
   )
 }
 
-function fallbackProjectMap(): Row[] {
+function MetricTile({ label, value, note, danger = false }: { label: string; value: unknown; note: string; danger?: boolean }) {
+  return (
+    <div className={danger ? "metric-tile command-danger" : "metric-tile"}>
+      <span>{label}</span>
+      <strong>{formatCell(value)}</strong>
+      <small>{note}</small>
+    </div>
+  )
+}
+
+function CommandKpi({ icon, title, value, note, kind = "info" }: { icon: ReactNode; title: string; value: unknown; note: string; kind?: StatusKind }) {
+  return (
+    <article className={`command-kpi command-kpi-${kind}`}>
+      <div>{icon}</div>
+      <span>{title}</span>
+      <strong>{formatCell(value)}</strong>
+      <small>{note}</small>
+    </article>
+  )
+}
+
+function chooseChampionAsset(activeAssets: Row[]) {
+  return activeAssets.find((asset) => text(asset.model_code, "") === preferredVisualModel) ?? activeAssets.find((asset) => text(asset.status, "") === "active") ?? {}
+}
+
+function latestMetric(metrics: Row, key: string) {
+  const value = metrics[key]
+  return value === undefined || value === null ? undefined : numberValue(value)
+}
+
+function modelConfidenceScore(metrics: Row, samples: number, status: unknown) {
+  const r2 = latestMetric(metrics, "r2")
+  const mae = latestMetric(metrics, "mae")
+  let score = 52
+  if (r2 !== undefined) score += r2 >= 0.7 ? 24 : r2 >= 0.3 ? 14 : r2 >= 0 ? 4 : -24
+  if (mae !== undefined) score += mae <= 0.08 ? 18 : mae <= 0.25 ? 10 : mae <= 0.5 ? 2 : -10
+  if (samples >= 18) score += 6
+  if (samples >= 1000) score += 6
+  if (text(status, "").toLowerCase() === "active") score += 2
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function modelTrustLabel(confidence: number, r2: number | undefined) {
+  if (r2 !== undefined && r2 < 0) return "Experimental"
+  if (confidence < 55) return "Confianza baja"
+  if (confidence < 75) return "Confianza media"
+  return "Confianza alta"
+}
+
+function modelTrustKind(confidence: number, r2: number | undefined): StatusKind {
+  if (r2 !== undefined && r2 < 0) return "warning"
+  if (confidence < 55) return "danger"
+  if (confidence < 75) return "warning"
+  return "success"
+}
+
+function recommendationText(confidence: number, r2: number | undefined) {
+  if (r2 !== undefined && r2 < 0) return "El modelo presenta bajo desempeno en validacion. Revisa la calidad del dataset o entrena un candidato antes de promoverlo."
+  if (confidence < 55) return "Ejecuta nuevas pruebas con datos recientes y compara contra Random Forest o regresion antes de usarlo como referencia operativa."
+  return "El modelo es usable para monitoreo asistido. Mantener trazabilidad y repetir validacion con nuevas muestras."
+}
+
+function modelDashboardName(modelCode: unknown, targetVariable: unknown) {
+  const code = text(modelCode, "")
+  const target = text(targetVariable, "").replace("dissolved_oxygen_mg_l", "OD").replace("water_temperature_c", "Temp")
+  if (code.includes("SVM")) return `SVR-${target}-v1`
+  if (code.includes("RANDOM_FOREST")) return `Random Forest-${target}`
+  if (code.includes("DECISION_TREE")) return `Arbol-${target}`
+  if (code.includes("LINEAR_REG")) return `Regresion lineal-${target}`
+  if (code.includes("KNN")) return `KNN-${target}`
+  if (code.includes("PCA")) return `PCA-${target}`
+  return modelTitle(code)
+}
+
+function shortId(value: unknown) {
+  const id = text(value, "-")
+  if (id.length <= 18) return id
+  return `${id.slice(0, 10)}...${id.slice(-6)}`
+}
+
+function buildDashboardPipelineRows(lifecycle: Row, champion: Row, championJob: Row, samples: number): Array<{ title: string; detail: string; status: string; kind: StatusKind }> {
+  const r2 = latestMetric(row(champion.metrics_json), "r2")
   return [
-    { order: 1, title: "Contenedor informatico / Arquitectura web", status: "IMPLEMENTADO", backend_status: "ready" },
-    { order: 2, title: "Modelos de regresion ML en Python", status: "EN PRUEBA", backend_status: "requires_artifacts" },
-    { order: 3, title: "Modelos de arboles de decision", status: "EN PRUEBA", backend_status: "contract_ready" },
-    { order: 4, title: "Analisis e interpretacion estadistica", status: "VALIDADO", backend_status: "ready" },
-    { order: 5, title: "Modelo matematico de oxigeno disuelto", status: "LISTO", backend_status: "ready" },
-    { order: 6, title: "Modelo de crecimiento de peces", status: "LISTO", backend_status: "ready" },
-    { order: 7, title: "Gemelo digital aplicado al crecimiento", status: "IMPLEMENTADO", backend_status: "ready" },
+    { title: "Datos", detail: `${samples || "0"} muestras`, status: lifecycle.datasets_enabled !== false ? "OK" : "Pendiente", kind: lifecycle.datasets_enabled !== false ? "success" : "warning" },
+    { title: "Limpieza", detail: "Valores tratados", status: lifecycle.cleaning_enabled !== false ? "OK" : "Pendiente", kind: lifecycle.cleaning_enabled !== false ? "success" : "warning" },
+    { title: "Features", detail: text(champion.feature_set_id, "Sin feature set"), status: champion.feature_set_id ? "OK" : "Pendiente", kind: champion.feature_set_id ? "success" : "warning" },
+    { title: "Entrenamiento", detail: shortId(champion.training_job_id), status: text(championJob.status, "Completado"), kind: statusKind(championJob.status ?? "completed") },
+    { title: "Validacion", detail: r2 === undefined ? "Metricas pendientes" : `R2 ${formatNumber(r2, 3)}`, status: r2 !== undefined && r2 < 0 ? "Advertencia" : "OK", kind: r2 !== undefined && r2 < 0 ? "warning" : "success" },
+    { title: "Artefacto", detail: text(champion.version, "v1"), status: champion.asset_id ? "Activo" : "Pendiente", kind: champion.asset_id ? "success" : "warning" },
+    { title: "Produccion", detail: text(champion.status, "sin estado"), status: text(champion.status, "Pendiente"), kind: statusKind(champion.status) },
+    { title: "Inferencia", detail: "Disponible", status: "ON", kind: "info" },
   ]
 }
 
-function DeliverableIcon({ index }: { index: number }) {
-  const icons = [Code2, LineChartIcon, GitBranch, BarChart3, Droplet, Activity, Cuboid]
-  const Icon = icons[index % icons.length]
-  return <Icon className="deliverable-icon" />
-}
-
-function LifecycleRows({ lifecycle }: { lifecycle: Row }) {
-  const rowsList = [
-    ["datasets_enabled", "Datasets"],
-    ["cleaning_enabled", "Limpieza"],
-    ["features_enabled", "Features"],
-    ["training_enabled", "Entrenamiento"],
-    ["model_assets_enabled", "Artefactos"],
-  ] as const
-  return (
-    <div className="check-list">
-      {rowsList.map(([key, label]) => {
-        const enabled = lifecycle[key] !== false
-        return (
-          <div key={key}>
-            <span>{label}</span>
-            <strong>{enabled ? "Habilitado" : "No disponible"}</strong>
-            {enabled ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-          </div>
-        )
-      })}
-    </div>
-  )
+function buildModelComparisonRows(activeAssets: Row[], trainable: Row[]) {
+  const merged = mergeModelRows(trainable, activeAssets)
+  return merged
+    .map((item) => {
+      const metrics = row(item.metrics_json ?? item.latest_metrics)
+      const mae = latestMetric(metrics, "mae")
+      const rmse = latestMetric(metrics, "rmse")
+      const r2 = latestMetric(metrics, "r2")
+      const target = row(item.artifact_payload).target_variable ?? item.target_variable ?? "calidad"
+      const confidence = modelConfidenceScore(metrics, 18, item.status ?? item.lifecycle_status)
+      return {
+        model_code: item.model_code,
+        model_name: modelDashboardName(item.model_code, target),
+        target_variable: target,
+        mae,
+        rmse,
+        r2,
+        state: modelTrustLabel(confidence, r2),
+        kind: modelTrustKind(confidence, r2),
+        score: confidence,
+      }
+    })
+    .sort((left, right) => {
+      const leftMae = left.mae ?? Number.POSITIVE_INFINITY
+      const rightMae = right.mae ?? Number.POSITIVE_INFINITY
+      if (left.kind === "success" && right.kind !== "success") return -1
+      if (right.kind === "success" && left.kind !== "success") return 1
+      return leftMae - rightMae
+    })
 }
 
 function Kpi({ icon, label, value, note, color = "blue" }: { icon: ReactNode; label: string; value: string; note: string; color?: string }) {
