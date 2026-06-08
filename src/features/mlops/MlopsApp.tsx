@@ -461,7 +461,7 @@ function SummaryView({ dashboard, dashboardError, selectedPondId, onNavigate }: 
       const sourceRows = previewRows.slice(0, 18)
       const results: Row[] = []
       for (const sample of sourceRows) {
-        const features = Object.fromEntries(featureNames.map((name) => [name, numberValue(sample[name])]))
+        const features = Object.fromEntries(featureNames.map((name, index) => [name, getSampleFeatureValue(sample, name, index)]))
         const prediction = await apiPost<unknown>(`/models/${championCode}/predict`, { features })
         results.push({
           label: String(results.length + 1),
@@ -493,8 +493,8 @@ function SummaryView({ dashboard, dashboardError, selectedPondId, onNavigate }: 
     if (!Object.keys(sample).length) return
     setFeatureValues((current) => {
       const next = { ...current }
-      featureNames.forEach((name) => {
-        next[name] = text(sample[name], "0")
+      featureNames.forEach((name, index) => {
+        next[name] = text(getSampleFeatureValue(sample, name, index), "0")
       })
       return next
     })
@@ -919,7 +919,7 @@ function CleaningView({ selectedPondId }: { selectedPondId: string }) {
   const [selectedVariables, setSelectedVariables] = useState<string[]>(defaultVariables.slice(0, 3))
   const [applyInterpolation, setApplyInterpolation] = useState(true)
   const [applySigma3, setApplySigma3] = useState(true)
-  const [applyMinmax, setApplyMinmax] = useState(false)
+  const [applyMinmax, setApplyMinmax] = useState(true)
   const [overwriteClean, setOverwriteClean] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState("")
   const createMutation = useMutation({
@@ -941,6 +941,22 @@ function CleaningView({ selectedPondId }: { selectedPondId: string }) {
   const activeRunId = selectedRunId || text(runs[0]?.run_id, "")
   const summaryQuery = useQuery({ queryKey: ["cleaning-summary", activeRunId], queryFn: () => apiGet<unknown>(`/data/cleaning-runs/${activeRunId}/summary`), enabled: Boolean(activeRunId) })
   const previewQuery = useQuery({ queryKey: ["cleaning-preview", activeRunId], queryFn: () => apiGet<unknown>(`/data/cleaning-runs/${activeRunId}/preview`), enabled: Boolean(activeRunId) })
+  const summary = row(summaryQuery.data)
+  const preview = unwrapObject(previewQuery.data)
+  const previewRows = rows(preview.preview_rows).length ? rows(preview.preview_rows) : rows(previewQuery.data)
+  const cleaningMethods = [
+    { title: "Interpolacion lineal", detail: "Completa huecos temporales sin modificar la base legacy.", active: applyInterpolation },
+    { title: "Regla 3 sigma", detail: "Marca valores extremos para evitar entrenar con ruido fuerte.", active: applySigma3 },
+    { title: "Normalizacion MinMax", detail: "Escala variables y deja el dataset listo para ML.", active: applyMinmax },
+    { title: "Persistencia versionada", detail: "Guarda cleaning_run_id y mediciones limpias separadas.", active: true },
+  ]
+  const autofillCleaning = () => {
+    setSelectedVariables(variables)
+    setApplyInterpolation(true)
+    setApplySigma3(true)
+    setApplyMinmax(true)
+    setOverwriteClean(false)
+  }
 
   return (
     <>
@@ -951,14 +967,30 @@ function CleaningView({ selectedPondId }: { selectedPondId: string }) {
       <ErrorNote error={variablesQuery.error ?? runsQuery.error ?? summaryQuery.error ?? previewQuery.error ?? createMutation.error} />
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
-          <h2>NUEVO CLEANING RUN</h2>
+          <div className="card-head">
+            <div>
+              <h2>NUEVO CLEANING RUN</h2>
+              <p className="soft">Preparacion reproducible antes de features y entrenamiento.</p>
+            </div>
+            <button type="button" className="mini-btn mini-btn-primary" onClick={autofillCleaning}>Autorrellenar</button>
+          </div>
+          <div className="method-grid">
+            {cleaningMethods.map((method) => (
+              <article className={method.active ? "method-card active" : "method-card"} key={method.title}>
+                <CheckCircle2 size={16} />
+                <strong>{method.title}</strong>
+                <p>{method.detail}</p>
+              </article>
+            ))}
+          </div>
           <CheckboxGroup values={variables} selected={selectedVariables} onChange={setSelectedVariables} />
           <div className="toggle-grid">
             <Toggle label="Interpolacion" checked={applyInterpolation} onChange={setApplyInterpolation} />
             <Toggle label="Filtro 3-sigma" checked={applySigma3} onChange={setApplySigma3} />
             <Toggle label="MinMax" checked={applyMinmax} onChange={setApplyMinmax} />
-            <Toggle label="Sobrescribir clean_measurements" checked={overwriteClean} onChange={setOverwriteClean} />
+            <Toggle label="Actualizar clean_measurements derivados" checked={overwriteClean} onChange={setOverwriteClean} />
           </div>
+          <div className="inline-state">La sincronizacion legacy queda intacta; esta corrida crea evidencia propia para entrenamiento.</div>
           <button type="button" className="success-action" disabled={!selectedVariables.length || createMutation.isPending} onClick={() => createMutation.mutate()}>
             <FlaskConical size={16} /> {createMutation.isPending ? "Ejecutando" : "Ejecutar limpieza"}
           </button>
@@ -966,8 +998,13 @@ function CleaningView({ selectedPondId }: { selectedPondId: string }) {
         <div className="studio-card mlops-card">
           <h2>RUNS Y PREVIEW</h2>
           <NativeSelect label="Cleaning run" value={activeRunId} options={runs.map((run) => text(run.run_id, ""))} onChange={setSelectedRunId} />
-          <MetricList rows={[["Run activo", activeRunId], ["Estado", row(summaryQuery.data).status ?? row(runs[0]).status], ["Records in", row(summaryQuery.data).records_in], ["Records out", row(summaryQuery.data).records_out], ["Outliers", row(summaryQuery.data).outliers_detected]]} />
-          <DataTable rows={rows(previewQuery.data).slice(0, 8)} columns={["time", "variable_code", "clean_value", "standard_unit", "quality_flag", "validation_status", "cleaning_method"]} />
+          <div className="cleaning-summary-grid">
+            <MetricTile label="Entrada" value={summary.records_in} note="registros raw" />
+            <MetricTile label="Salida" value={summary.records_out} note="registros limpios" />
+            <MetricTile label="Outliers" value={summary.outliers_detected} note="regla 3 sigma" danger={numberValue(summary.outliers_detected) > 0} />
+          </div>
+          <MetricList rows={[["Run activo", activeRunId], ["Estado", summary.status ?? row(runs[0]).status], ["Interpolados", summary.interpolated_points], ["Normalizados", summary.normalized_points], ["Persistencia", "cleaning_run_measurements"]]} />
+          <DataTable rows={previewRows.slice(0, 8)} columns={["time", "variable_code", "clean_value", "standard_unit", "quality_flag", "validation_status", "cleaning_method"]} />
         </div>
       </section>
     </>
@@ -1059,7 +1096,7 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   const [featureSetId, setFeatureSetId] = useState("")
   const [epochs, setEpochs] = useState(400)
   const [learningRate, setLearningRate] = useState("0.0001")
-  const [autoActivate, setAutoActivate] = useState(true)
+  const [autoActivate, setAutoActivate] = useState(false)
   const [selectedJobId, setSelectedJobId] = useState("")
   const createMutation = useMutation({
     mutationFn: () =>
@@ -1078,6 +1115,21 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   const activeJobId = selectedJobId || text(jobs[0]?.job_id, "")
   const eventsQuery = useQuery({ queryKey: ["training-events", activeJobId], queryFn: () => apiGet<unknown>(`/ml/training-jobs/${activeJobId}/events`), enabled: Boolean(activeJobId), refetchInterval: 10_000 })
   const availableModelCodes = trainable.map((item) => text(item.model_code, "")).filter(Boolean)
+  const activeJob = jobs.find((job) => text(job.job_id, "") === activeJobId) ?? {}
+  const activeFeatureSet = features.find((feature) => text(feature.feature_set_id, "") === (featureSetId || text(activeJob.feature_set_id, ""))) ?? {}
+  const trainingSteps = buildTrainingProgressRows(activeJob, createMutation.isPending)
+  const autofillTraining = () => {
+    const preferredModel = availableModelCodes.includes(preferredVisualModel) ? preferredVisualModel : availableModelCodes[0] || defaultModel
+    const preferredFeature =
+      features.find((feature) => text(feature.target_variable, "") === "ph") ??
+      features.find((feature) => text(feature.target_variable, "") === "dissolved_oxygen_mg_l") ??
+      features[0]
+    setModelCode(preferredModel)
+    setFeatureSetId(text(preferredFeature?.feature_set_id, ""))
+    setEpochs(400)
+    setLearningRate("0.0001")
+    setAutoActivate(false)
+  }
 
   return (
     <>
@@ -1088,22 +1140,42 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
       <ErrorNote error={trainableQuery.error ?? featuresQuery.error ?? jobsQuery.error ?? eventsQuery.error ?? createMutation.error} />
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
-          <h2>LANZADOR DE PIPELINE</h2>
+          <div className="card-head">
+            <div>
+              <h2>LANZADOR DE PIPELINE</h2>
+              <p className="soft">Entrena candidatos; la promocion a produccion se hace desde artefactos.</p>
+            </div>
+            <button type="button" className="mini-btn mini-btn-primary" onClick={autofillTraining}>Autorrellenar</button>
+          </div>
           <NativeSelect label="Modelo entrenable" value={modelCode} options={availableModelCodes.length ? availableModelCodes : [defaultModel, "BPNN_MEA_FEED_INTAKE", "PEARSON_LSTM_ATTENTION_WQ"]} onChange={setModelCode} />
           <NativeSelect label="Feature set" value={featureSetId} options={features.map((feature) => text(feature.feature_set_id, ""))} onChange={setFeatureSetId} />
+          <div className="training-context">
+            <MetricTile label="Target" value={activeFeatureSet.target_variable ?? "-"} note="feature set" />
+            <MetricTile label="Filas train" value={activeFeatureSet.train_rows ?? "-"} note="muestras" />
+            <MetricTile label="Filas test" value={activeFeatureSet.test_rows ?? "-"} note="validacion" />
+          </div>
           <NumberGrid rows={[["epochs", epochs, setEpochs]]} />
           <label className="form-line">
             <span>learning_rate</span>
             <input value={learningRate} onChange={(event) => setLearningRate(event.target.value)} />
           </label>
-          <Toggle label="Auto activar artefacto" checked={autoActivate} onChange={setAutoActivate} />
+          <Toggle label="Auto activar artefacto si el backend lo permite" checked={autoActivate} onChange={setAutoActivate} />
           <button type="button" className="success-action" disabled={!modelCode || createMutation.isPending} onClick={() => createMutation.mutate()}>
-            <Brain size={16} /> {createMutation.isPending ? "Entrenando" : "Entrenar"}
+            <Brain size={16} /> {createMutation.isPending ? "Entrenando candidato" : "Entrenar candidato"}
           </button>
         </div>
         <div className="studio-card mlops-card">
           <h2>JOBS Y EVENTOS</h2>
           <NativeSelect label="Training job" value={activeJobId} options={jobs.map((job) => text(job.job_id, ""))} onChange={setSelectedJobId} />
+          <div className="training-stage-track">
+            {trainingSteps.map((step) => (
+              <article className={`training-stage training-stage-${step.kind}`} key={step.title}>
+                <span>{step.title}</span>
+                <strong>{step.value}</strong>
+                <small>{step.detail}</small>
+              </article>
+            ))}
+          </div>
           <DataTable rows={jobs.slice(0, 6)} columns={["job_id", "model_code", "feature_set_id", "status", "asset_id", "created_at"]} />
           <EventTimeline events={rows(eventsQuery.data)} pondId={selectedPondId} />
         </div>
@@ -1175,15 +1247,27 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   const featureSets = rows(featuresQuery.data)
   const [selectedModelCode, setSelectedModelCode] = useState(preferredVisualModel)
   const selectedAsset = activeAssets.find((asset) => text(asset.model_code, "") === selectedModelCode) ?? {}
-  const selectedTrainable = trainable.find((model) => text(model.model_code, "") === selectedModelCode) ?? {}
   const selectedJob = jobs.find((job) => text(job.job_id, "") === text(selectedAsset.training_job_id, "")) ?? {}
   const featureSetId = text(selectedAsset.feature_set_id, "")
   const selectedFeatureSet = featureSets.find((featureSet) => text(featureSet.feature_set_id, "") === featureSetId) ?? {}
+  const readinessQuery = useQuery({
+    queryKey: ["model-readiness", selectedPondId, selectedModelCode],
+    queryFn: () => apiGet<unknown>(query("/datasets/readiness", { pond_id: selectedPondId, model_code: selectedModelCode })),
+    enabled: Boolean(selectedPondId && selectedModelCode),
+  })
+  const lifecycleDetailQuery = useQuery({
+    queryKey: ["model-lifecycle-detail", selectedPondId, selectedModelCode],
+    queryFn: () => apiGet<unknown>(query(`/ml/models/${selectedModelCode}/lifecycle`, { pond_id: selectedPondId })),
+    enabled: Boolean(selectedPondId && selectedModelCode),
+    refetchInterval: 30_000,
+  })
   const previewQuery = useQuery({
     queryKey: ["model-feature-preview", featureSetId],
     queryFn: () => apiGet<unknown>(`/features/${featureSetId}/preview`),
     enabled: Boolean(featureSetId),
   })
+  const readiness = unwrapObject(readinessQuery.data)
+  const lifecycleDetail = unwrapObject(lifecycleDetailQuery.data)
   const previewObject = unwrapObject(previewQuery.data)
   const previewRows = rows(previewObject.preview_rows)
   const previewColumns = rows(previewObject.columns).length ? rows(previewObject.columns) : rows(selectedFeatureSet.columns)
@@ -1206,7 +1290,7 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
       const sourceRows = previewRows.slice(0, 18)
       const results: Row[] = []
       for (const sample of sourceRows) {
-        const features = Object.fromEntries(featureNames.map((name) => [name, numberValue(sample[name])]))
+        const features = Object.fromEntries(featureNames.map((name, index) => [name, getSampleFeatureValue(sample, name, index)]))
         const prediction = await apiPost<unknown>(`/models/${selectedModelCode}/predict`, { features })
         results.push({
           label: String(results.length + 1),
@@ -1228,6 +1312,15 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   const pearsonRows = useMemo(() => buildPearsonRows(previewColumns), [previewColumns])
   const latestDemoRow = demoRows[demoRows.length - 1] ?? {}
   const averageError = demoRows.length ? demoRows.reduce((sum, item) => sum + numberValue(item.error), 0) / demoRows.length : null
+  const selectedMetrics = row(selectedAsset.metrics_json ?? selectedJob.metrics)
+  const selectedR2 = latestMetric(selectedMetrics, "r2")
+  const selectedMae = latestMetric(selectedMetrics, "mae")
+  const selectedRmse = latestMetric(selectedMetrics, "rmse")
+  const selectedConfidence = modelConfidenceScore(selectedMetrics, previewRows.length, selectedAsset.status)
+  const selectedTrust = modelTrustLabel(selectedConfidence, selectedR2)
+  const backendSteps = rows(lifecycleDetail.steps)
+  const backendPredictions = rows(lifecycleDetail.recent_predictions)
+  const detailedSteps = backendSteps.length ? backendSteps : buildDetailedModelSteps(readiness, selectedFeatureSet, selectedJob, selectedAsset, selectedMetrics, demoRows.length)
 
   useEffect(() => {
     if (activeAssets.length && !activeAssets.some((asset) => text(asset.model_code, "") === selectedModelCode)) {
@@ -1236,14 +1329,12 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   }, [activeAssets, selectedModelCode])
 
   const fillSample = (sample: Row) => {
-    if (!Object.keys(sample).length) return
-    setFeatureValues((current) => {
-      const next = { ...current }
-      featureNames.forEach((name) => {
-        next[name] = text(sample[name], "0")
-      })
-      return next
+    const source = Object.keys(sample).length ? sample : row(previewRows[0] ?? previewChartRows[0])
+    const next: Record<string, string> = {}
+    featureNames.forEach((name, index) => {
+      next[name] = text(getSampleFeatureValue(source, name, index), "0")
     })
+    setFeatureValues(next)
   }
 
   const loadSample = () => {
@@ -1255,6 +1346,18 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
     demoMutation.mutate()
   }
 
+  useEffect(() => {
+    if (!featureNames.length || !previewRows.length) return
+    const hasLoadedValues = featureNames.some((name) => text(featureValues[name], "") !== "")
+    if (hasLoadedValues) return
+    const source = row(previewRows[0])
+    const next: Record<string, string> = {}
+    featureNames.forEach((name, index) => {
+      next[name] = text(getSampleFeatureValue(source, name, index), "0")
+    })
+    setFeatureValues(next)
+  }, [featureNames, featureValues, previewRows])
+
   return (
     <>
       <section className="page-head model-page-head">
@@ -1264,7 +1367,7 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <div className="institution-lockup">INICTEL-UNI · PROCIENCIA</div>
       </section>
-      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
+      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? readinessQuery.error ?? lifecycleDetailQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
       <section className="kpi-grid lifecycle-kpis">
         <Kpi icon={<Database />} label="Limpiezas" value={text(lifecycle.cleaning_enabled ? rowsCountHint(lifecycle, "cleaning") : "0")} note="datos trazables" />
         <Kpi icon={<Table2 />} label="Feature sets" value={text(lifecycle.total_feature_sets, "0")} note={`${featureSets.length} listados`} color="green" />
@@ -1276,11 +1379,34 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
         <div>
           <span>Modelo seleccionado</span>
           <strong>{modelTitle(selectedModelCode)}</strong>
-          <p>Objetivo: {targetVariable}. Use la prueba automatica para llenar variables, ejecutar inferencias reales y ver la proyeccion en el grafico.</p>
+          <p>Objetivo: {targetVariable}. Estado: {selectedTrust}. Use la prueba automatica para llenar variables, ejecutar inferencias reales y ver la proyeccion en el grafico.</p>
+          <div className="model-showcase-badges">
+            <Badge kind={modelTrustKind(selectedConfidence, selectedR2)}>{selectedTrust}</Badge>
+            <Badge kind={readiness.can_train === false ? "warning" : "success"}>{readiness.can_train === false ? "faltan datos" : "datos listos"}</Badge>
+            <Badge kind={selectedAsset.asset_id ? "success" : "warning"}>{selectedAsset.asset_id ? "artefacto activo" : "sin artefacto"}</Badge>
+            <Badge kind={backendSteps.length ? "success" : "info"}>{backendSteps.length ? "ciclo backend" : "ciclo local"}</Badge>
+          </div>
         </div>
         <button type="button" className="run-demo-action" disabled={!selectedAsset.asset_id || !previewRows.length || demoMutation.isPending} onClick={runAutoDemo}>
           <Rocket size={18} /> {demoMutation.isPending ? "Probando modelo" : "Autorrellenar y probar modelo"}
         </button>
+      </section>
+      <section className="model-command-center">
+        <article className="studio-card model-command-card">
+          <span>Lectura operativa</span>
+          <strong>{readiness.can_train === false ? "No entrenable aun" : "Entrenable con MySQL"}</strong>
+          <p>{readiness.can_train === false ? `Faltan: ${formatRequiredVariables(readiness.missing_variables)}` : `${text(readiness.minimum_records_required, "8")} registros minimos requeridos; base actual suficiente.`}</p>
+        </article>
+        <article className="studio-card model-command-card">
+          <span>Validacion</span>
+          <strong>{selectedR2 !== undefined && selectedR2 < 0 ? "No recomendar" : selectedAsset.asset_id ? "Evaluado" : "Pendiente"}</strong>
+          <p>MAE {formatNumber(selectedMae, 4)} · RMSE {formatNumber(selectedRmse, 4)} · R2 {formatNumber(selectedR2, 3)}</p>
+        </article>
+        <article className="studio-card model-command-card">
+          <span>Siguiente accion</span>
+          <strong>{selectedR2 !== undefined && selectedR2 < 0 ? "Entrenar candidato" : selectedAsset.asset_id ? "Probar inferencia" : "Crear artefacto"}</strong>
+          <p>{recommendationText(selectedConfidence, selectedR2)}</p>
+        </article>
       </section>
       <section className="model-lifecycle-layout">
         <div className="studio-card model-list-panel">
@@ -1319,21 +1445,20 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
               </div>
               <Badge kind={selectedAsset.asset_id ? "success" : "warning"}>{selectedAsset.asset_id ? "Artefacto activo" : "Sin artefacto activo"}</Badge>
             </div>
-            <div className="lifecycle-steps">
-              <LifecycleStep number="1" title="Datos" status={selectedTrainable.required_variables ? "ready" : "pending"} detail={formatRequiredVariables(selectedTrainable.required_variables)} />
-              <LifecycleStep number="2" title="Limpieza" status="ready" detail="Datos versionados por cleaning run." />
-              <LifecycleStep number="3" title="Preparacion" status={featureSetId ? "ready" : "pending"} detail={featureSetId || "Cree un feature set para este modelo."} />
-              <LifecycleStep number="4" title="Entrenamiento" status={selectedJob.status ?? selectedAsset.training_job_id} detail={text(selectedAsset.training_job_id, "Sin job asociado")} />
-              <LifecycleStep number="5" title="Produccion" status={selectedAsset.status} detail={text(selectedAsset.asset_id, "Sin asset activo")} />
+            <div className="lifecycle-steps lifecycle-steps-full">
+              {detailedSteps.map((step, index) => (
+                <LifecycleStep key={text(step.title, String(index))} number={String(index + 1)} title={text(step.title ?? row(step).step, "Paso")} status={step.status} detail={formatLifecycleDetail(step.detail)} />
+              ))}
             </div>
             <section className="model-info-grid">
               <div>
                 <h3>Metricas del modelo</h3>
-                <MetricList rows={metricRows(selectedAsset.metrics_json ?? selectedJob.metrics)} />
+                <MetricList rows={metricRows(selectedMetrics)} />
               </div>
               <div>
                 <h3>Trazabilidad del artefacto</h3>
-                <MetricList rows={[["Version", selectedAsset.version], ["Feature set", selectedAsset.feature_set_id], ["Training job", selectedAsset.training_job_id], ["Activado", selectedAsset.activated_at]]} />
+                <MetricList rows={[["Version", selectedAsset.version], ["Feature set", selectedAsset.feature_set_id], ["Training job", selectedAsset.training_job_id], ["Activado", selectedAsset.activated_at], ["Inferencias guardadas", backendPredictions.length], ["Variables faltantes", readiness.missing_variables]]} />
+                <JsonButton label="Ciclo backend completo" value={lifecycleDetailQuery.data} />
               </div>
             </section>
           </section>
@@ -1373,6 +1498,9 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(value) => formatNumber(value, 5)} labelFormatter={(label) => `Muestra ${label}`} />
                     <Legend />
+                    <ReferenceLine y={0.8} stroke="#16a34a" strokeDasharray="4 4" label="Optimo superior" />
+                    <ReferenceLine y={0.4} stroke="#16a34a" strokeDasharray="4 4" label="Optimo inferior" />
+                    <ReferenceLine y={0.3} stroke="#f59e0b" strokeDasharray="4 4" label="Alerta" />
                     <Line type="monotone" dataKey="observed" name="Observado" stroke="#0ea5e9" strokeWidth={3} dot={false} />
                     <Line type="monotone" dataKey="predicted" name="Predicho por modelo" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} connectNulls />
                     <Line type="monotone" dataKey="trend" name="Tendencia preview" stroke="#8b5cf6" strokeDasharray="6 4" strokeWidth={2} dot={false} />
@@ -1453,10 +1581,15 @@ function buildPreviewChartRows(previewRows: Row[], featureNames: string[]) {
       index: numberValue(sample.row_index, index),
       observed,
       trend: (previous + observed + next) / 3,
-      [featureNames[0] ?? "feature_1"]: numberValue(sample[featureNames[0] ?? ""]),
-      [featureNames[1] ?? "feature_2"]: numberValue(sample[featureNames[1] ?? ""]),
+      [featureNames[0] ?? "feature_1"]: getSampleFeatureValue(sample, featureNames[0] ?? "", 0),
+      [featureNames[1] ?? "feature_2"]: getSampleFeatureValue(sample, featureNames[1] ?? "", 1),
     }
   })
+}
+
+function getSampleFeatureValue(sample: Row, name: string, index: number) {
+  const nestedFeatures = row(sample.features)
+  return numberValue(sample[name] ?? nestedFeatures[name] ?? sample[`feature_${index + 1}`] ?? nestedFeatures[`feature_${index + 1}`] ?? 0)
 }
 
 function buildPearsonRows(columns: Row[]) {
@@ -1479,8 +1612,81 @@ function rowsCountHint(lifecycle: Row, key: string) {
   return "-"
 }
 
+function buildTrainingProgressRows(job: Row, isCreating: boolean): Array<{ title: string; value: string; detail: string; kind: StatusKind }> {
+  const status = text(job.status, isCreating ? "running" : "pending")
+  const hasJob = Boolean(job.job_id) || isCreating
+  const hasAsset = Boolean(job.asset_id)
+  const hasMetrics = Object.keys(row(job.metrics)).length > 0
+  return [
+    { title: "Datos", value: text(job.feature_set_id, hasJob ? "asignado" : "pendiente"), detail: "Feature set de entrada", kind: hasJob ? "success" : "warning" },
+    { title: "Entrenamiento", value: isCreating ? "corriendo" : status, detail: text(job.model_code, "sin modelo"), kind: isCreating ? "info" : statusKind(status) },
+    { title: "Validacion", value: hasMetrics ? "metricas" : "pendiente", detail: hasMetrics ? "MAE / RMSE / R2 publicados" : "esperando salida", kind: hasMetrics ? "success" : "warning" },
+    { title: "Artefacto", value: hasAsset ? "creado" : "sin asset", detail: text(job.asset_id, "no publicado"), kind: hasAsset ? "success" : "warning" },
+  ]
+}
+
+function buildDetailedModelSteps(readiness: Row, featureSet: Row, job: Row, asset: Row, metrics: Row, inferenceCount: number): Array<{ title: string; status: string; detail: string }> {
+  const r2 = latestMetric(metrics, "r2")
+  const hasMetrics = Object.keys(metrics).length > 0
+  return [
+    {
+      title: "Datos",
+      status: readiness.can_train === false ? "warning" : "ready",
+      detail: readiness.can_train === false ? `Faltan ${formatRequiredVariables(readiness.missing_variables)}` : `${text(readiness.available_variables, "variables listas")}`,
+    },
+    {
+      title: "Limpieza",
+      status: "ready",
+      detail: "Corridas versionadas y mediciones limpias persistidas.",
+    },
+    {
+      title: "Features",
+      status: featureSet.feature_set_id ? "ready" : "pending",
+      detail: text(featureSet.feature_set_id, "Cree feature set para entrenar."),
+    },
+    {
+      title: "Entrenamiento",
+      status: text(job.status, "pending"),
+      detail: text(job.job_id, "Sin job asociado."),
+    },
+    {
+      title: "Validacion",
+      status: !hasMetrics ? "pending" : r2 !== undefined && r2 < 0 ? "warning" : "ready",
+      detail: hasMetrics ? `R2 ${formatNumber(r2, 3)} · MAE ${formatNumber(metrics.mae, 4)}` : "Metricas pendientes.",
+    },
+    {
+      title: "Artefacto",
+      status: asset.asset_id ? "ready" : "pending",
+      detail: text(asset.asset_id, "Sin artefacto versionado."),
+    },
+    {
+      title: "Produccion",
+      status: text(asset.status, "pending"),
+      detail: text(asset.activated_at, "No activado."),
+    },
+    {
+      title: "Inferencia",
+      status: inferenceCount > 0 ? "ready" : asset.asset_id ? "pending" : "warning",
+      detail: inferenceCount > 0 ? `${inferenceCount} inferencias ejecutadas en UI.` : "Ejecute prueba guiada con datos reales.",
+    },
+  ]
+}
+
 function formatRequiredVariables(value: unknown) {
   return Array.isArray(value) && value.length ? value.map(String).join(", ") : "Variables segun contrato del modelo."
+}
+
+function formatLifecycleDetail(value: unknown) {
+  if (value && typeof value === "object") {
+    const payload = row(value)
+    if (payload.recent_predictions !== undefined) return `${formatNumber(payload.recent_predictions, 0)} inferencias recientes`
+    const compact = Object.entries(payload)
+      .slice(0, 3)
+      .map(([key, item]) => `${key}: ${formatCell(item)}`)
+      .join(" · ")
+    return compact || "detalle backend"
+  }
+  return text(value, "detalle pendiente")
 }
 
 function metricRows(value: unknown): [string, unknown][] {
