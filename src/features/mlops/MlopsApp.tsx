@@ -25,12 +25,16 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import {
+  Area,
   Bar,
   BarChart,
+  Brush,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -49,6 +53,7 @@ const defaultPond = "LEGACY-POND-1"
 const defaultModel = "ML_SUPERVISED_LINEAR_REG"
 const preferredVisualModel = "ML_NONLINEAR_SVM"
 const defaultVariables = ["water_temperature_c", "ph", "dissolved_oxygen_mg_l", "nitrate_ion"]
+const twinModelColors = ["#1976ff", "#16a34a", "#f59e0b", "#8b5cf6", "#ef4444", "#0891b2", "#db2777", "#64748b", "#0f766e", "#c2410c"]
 
 const modelUiCatalog: Record<string, { name: string; family: string; purpose: string; output: string }> = {
   ML_SUPERVISED_LINEAR_REG: {
@@ -508,6 +513,7 @@ function OperationalSummaryView({
 function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const [horizonHours, setHorizonHours] = useState(24)
   const [selectedModels, setSelectedModels] = useState<string[]>([])
+  const [modelsInitialized, setModelsInitialized] = useState(false)
   const [adjustments, setAdjustments] = useState<Record<string, number>>({
     dissolved_oxygen_mg_l: 0,
     water_temperature_c: 0,
@@ -525,10 +531,10 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     return Array.from(codes).filter(Boolean)
   }, [assets, catalog])
   useEffect(() => {
-    if (selectedModels.length || !availableModels.length) return
-    const preferred = ["DO_DYNAMIC_0D_ROYER_2021", "RAS_OXYGEN_BALANCE", "PEARSON_LSTM_ATTENTION_WQ", "YI_ENVIRONMENTAL_GROWTH", "BIOENERGETIC_SPARUS_AURATA_BRIGOLIN_2010"]
-    setSelectedModels(preferred.filter((code) => availableModels.includes(code)))
-  }, [availableModels, selectedModels.length])
+    if (modelsInitialized || !availableModels.length) return
+    setSelectedModels(availableModels)
+    setModelsInitialized(true)
+  }, [availableModels, modelsInitialized])
   const projectionQuery = useQuery({
     queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments],
     queryFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/projection`, {
@@ -545,12 +551,19 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const trends = row(projection.observed_trends_per_hour)
   const chartRows = rows(projection.points).map((point) => {
     const values = row(point.values)
+    const modelActivity = row(point.model_activity)
     return {
       hour: formatHourLabel(point.timestamp),
       ...values,
+      ...Object.fromEntries(Object.entries(modelActivity).map(([code, value]) => [`model_${code}`, value])),
     }
   })
   const participation = rows(projection.model_participation)
+  const oxygen = numberValue(baseline.dissolved_oxygen_mg_l)
+  const temperature = numberValue(baseline.water_temperature_c)
+  const ph = numberValue(baseline.ph)
+  const nitrate = numberValue(baseline.nitrate_ion)
+  const poolState = oxygen > 0 && oxygen < 4 ? "critical" : oxygen > 0 && oxygen < 5 ? "warning" : "healthy"
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
   return (
     <>
@@ -562,6 +575,36 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         <Badge kind={projectionQuery.isFetching ? "info" : "success"}>{projectionQuery.isFetching ? "actualizando" : "sincronizado"}</Badge>
       </section>
       <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error} />
+      <section className="studio-card virtual-pool-card">
+        <div className="card-head">
+          <div><h2>PISCINA VIRTUAL EN VIVO</h2><p className="soft">Representación operativa conectada a las últimas mediciones limpias del estanque.</p></div>
+          <Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "condición estable" : poolState === "warning" ? "requiere atención" : "condición crítica"}</Badge>
+        </div>
+        <div className="virtual-pool-layout">
+          <div className={`virtual-pool virtual-pool-${poolState}`}>
+            <div className="pool-water-rings"><span /><span /><span /></div>
+            <div className="pool-aerator"><i /><i /><i /><i /><i /></div>
+            <div className="pool-fish fish-one">›</div>
+            <div className="pool-fish fish-two">›</div>
+            <div className="pool-fish fish-three">›</div>
+            <div className="pool-fish fish-four">›</div>
+            <div className="pool-core">
+              <Droplet size={28} />
+              <strong>{formatNumber(oxygen, 2)} mg/L</strong>
+              <span>Oxígeno disuelto</span>
+            </div>
+            <span className="pool-sensor pool-sensor-a">S1</span>
+            <span className="pool-sensor pool-sensor-b">S2</span>
+            <span className="pool-sensor pool-sensor-c">S3</span>
+          </div>
+          <div className="pool-live-panel">
+            <div><span>Temperatura</span><strong>{formatNumber(temperature, 2)} °C</strong><small>{formatNumber(trends.water_temperature_c, 4)} / hora</small></div>
+            <div><span>pH</span><strong>{formatNumber(ph, 2)}</strong><small>{formatNumber(trends.ph, 4)} / hora</small></div>
+            <div><span>Nitrato</span><strong>{formatNumber(nitrate, 2)}</strong><small>{formatNumber(trends.nitrate_ion, 4)} / hora</small></div>
+            <div><span>Modelos integrados</span><strong>{selectedModels.length}</strong><small>{participation.filter((item) => text(item.status) === "available").length} disponibles</small></div>
+          </div>
+        </div>
+      </section>
       <section className="twin-control-grid">
         <div className="studio-card mlops-card twin-controls">
           <div className="card-head"><div><h2>ESCENARIO</h2><p className="soft">Los cambios son incrementos por hora y quedan identificados como simulación.</p></div><JsonButton label="Trazabilidad completa del escenario" value={projection} /></div>
@@ -579,7 +622,14 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
           <button type="button" className="outline-action native-wide" onClick={() => setAdjustments({ dissolved_oxygen_mg_l: 0, water_temperature_c: 0, ph: 0, nitrate_ion: 0 })}>Restablecer escenario real</button>
         </div>
         <div className="studio-card mlops-card twin-models">
-          <div className="card-head"><div><h2>MODELOS QUE PARTICIPAN</h2><p className="soft">Active o desactive modelos y revise su injerencia declarada.</p></div><Badge kind="info">{selectedModels.length} activos</Badge></div>
+          <div className="card-head">
+            <div><h2>MODELOS QUE PARTICIPAN</h2><p className="soft">Todos inician activos; puede aislar únicamente los que desea comparar.</p></div>
+            <div className="twin-model-actions">
+              <button type="button" className="mini-btn mini-btn-ghost" onClick={() => setSelectedModels([])}>Limpiar</button>
+              <button type="button" className="mini-btn mini-btn-primary" onClick={() => setSelectedModels(availableModels)}>Activar todos</button>
+              <Badge kind="info">{selectedModels.length} activos</Badge>
+            </div>
+          </div>
           <div className="twin-model-list">
             {availableModels.map((modelCode) => {
               const active = selectedModels.includes(modelCode)
@@ -591,20 +641,56 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         </div>
       </section>
       <section className="studio-card mlops-card twin-chart-card">
-        <div className="card-head"><div><h2>PROYECCIÓN HORARIA DEL ESTANQUE</h2><p className="soft">Eje temporal real. Datos base: clean_measurements; escenario: cambios marcados por el operador.</p></div><Badge kind="warning">escenario operacional</Badge></div>
-        <ResponsiveContainer width="100%" height={430}>
-          <LineChart data={chartRows} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
+        <div className="card-head"><div><h2>COMPORTAMIENTO INTEGRADO DEL ESTANQUE</h2><p className="soft">Variables físicas sobre el mismo horizonte. Use el selector inferior para ampliar cualquier tramo.</p></div><Badge kind="warning">escenario operacional</Badge></div>
+        <ResponsiveContainer width="100%" height={470}>
+          <ComposedChart data={chartRows} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
             <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(value) => formatNumber(value, 4)} />
+            <YAxis yAxisId="water" tick={{ fontSize: 11 }} label={{ value: "mg/L", angle: -90, position: "insideLeft" }} />
+            <YAxis yAxisId="environment" orientation="right" tick={{ fontSize: 11 }} label={{ value: "°C / pH", angle: 90, position: "insideRight" }} />
+            <Tooltip formatter={(value, name) => [formatNumber(value, 4), name]} />
             <Legend />
-            <Line type="monotone" dataKey="dissolved_oxygen_mg_l" name="Oxígeno disuelto" stroke="#1976ff" strokeWidth={3} dot={false} />
-            <Line type="monotone" dataKey="water_temperature_c" name="Temperatura" stroke="#ef4444" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="ph" name="pH" stroke="#16a34a" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="nitrate_ion" name="Nitrato" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-          </LineChart>
+            <ReferenceArea yAxisId="water" y1={5} y2={9} fill="#dcfce7" fillOpacity={0.4} label="OD operativo" />
+            <ReferenceLine yAxisId="water" y={4} stroke="#ef4444" strokeDasharray="5 5" label="OD crítico" />
+            <Area yAxisId="water" type="monotone" dataKey="dissolved_oxygen_mg_l" name="Oxígeno disuelto" stroke="#1976ff" fill="#bfdbfe" fillOpacity={0.55} strokeWidth={3} dot={false} />
+            <Line yAxisId="environment" type="monotone" dataKey="water_temperature_c" name="Temperatura" stroke="#ef4444" strokeWidth={2.5} dot={false} />
+            <Line yAxisId="environment" type="monotone" dataKey="ph" name="pH" stroke="#16a34a" strokeWidth={2.5} dot={false} />
+            <Line yAxisId="water" type="monotone" dataKey="nitrate_ion" name="Nitrato" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+            <Brush dataKey="hour" height={26} stroke="#1976ff" travellerWidth={8} />
+          </ComposedChart>
         </ResponsiveContainer>
+      </section>
+      <section className="studio-card mlops-card twin-chart-card model-orchestration-card">
+        <div className="card-head">
+          <div><h2>ORQUESTACIÓN DE TODOS LOS MODELOS</h2><p className="soft">Cada curva muestra el índice de participación operacional del modelo seleccionado durante el escenario.</p></div>
+          <Badge kind="info">{participation.length} capas simultáneas</Badge>
+        </div>
+        <ResponsiveContainer width="100%" height={390}>
+          <ComposedChart data={chartRows} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+            <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+            <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} label={{ value: "Actividad %", angle: -90, position: "insideLeft" }} />
+            <Tooltip formatter={(value, name) => [`${formatNumber(value, 2)}%`, name]} />
+            <Legend />
+            <ReferenceArea y1={70} y2={100} fill="#dcfce7" fillOpacity={0.35} />
+            <ReferenceArea y1={30} y2={70} fill="#fef3c7" fillOpacity={0.3} />
+            {participation.map((item, index) => (
+              <Line
+                key={text(item.model_code)}
+                type="monotone"
+                dataKey={`model_${text(item.model_code)}`}
+                name={modelTitle(text(item.model_code))}
+                stroke={twinModelColors[index % twinModelColors.length]}
+                strokeWidth={text(item.status) === "available" ? 3 : 2}
+                strokeDasharray={text(item.status) === "available" ? undefined : "6 4"}
+                dot={false}
+                connectNulls
+              />
+            ))}
+            <Brush dataKey="hour" height={26} stroke="#16a34a" travellerWidth={8} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div className="model-layer-note"><AlertTriangle size={16} /><span>Este índice representa disponibilidad e injerencia sobre el escenario. No reemplaza la salida numérica propia de cada modelo ni inventa predicciones.</span></div>
       </section>
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
