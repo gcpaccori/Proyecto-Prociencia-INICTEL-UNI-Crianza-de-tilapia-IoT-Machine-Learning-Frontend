@@ -548,6 +548,10 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   })
   const projection = row(projectionQuery.data)
   const baseline = row(projection.baseline_values)
+  const baselineObservedAt = row(projection.baseline_observed_at)
+  const baselineIngestedAt = row(projection.baseline_ingested_at)
+  const baselineUnits = row(projection.baseline_units)
+  const baselineQualityFlags = row(projection.baseline_quality_flags)
   const trends = row(projection.observed_trends_per_hour)
   const chartRows = rows(projection.points).map((point) => {
     const values = row(point.values)
@@ -564,6 +568,12 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const ph = numberValue(baseline.ph)
   const nitrate = numberValue(baseline.nitrate_ion)
   const poolState = oxygen > 0 && oxygen < 4 ? "critical" : oxygen > 0 && oxygen < 5 ? "warning" : "healthy"
+  const liveMeasurementCards = [
+    { code: "dissolved_oxygen_mg_l", label: "Oxígeno disuelto", value: oxygen, fallbackUnit: "mg/L" },
+    { code: "water_temperature_c", label: "Temperatura", value: temperature, fallbackUnit: "°C" },
+    { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
+    { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
+  ]
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
   return (
     <>
@@ -577,17 +587,25 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
       <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error} />
       <section className="studio-card virtual-pool-card">
         <div className="card-head">
-          <div><h2>PISCINA VIRTUAL EN VIVO</h2><p className="soft">Representación operativa conectada a las últimas mediciones limpias del estanque.</p></div>
-          <Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "condición estable" : poolState === "warning" ? "requiere atención" : "condición crítica"}</Badge>
+          <div><h2>PISCINA VIRTUAL EN VIVO</h2><p className="soft">Lecturas reales de MySQL. Las proyecciones inferiores parten exactamente de estos valores y sus tendencias observadas.</p></div>
+          <div className="pool-sync-state">
+            <span>Escenario recalculado</span>
+            <strong>{formatDateTime(projection.generated_at)}</strong>
+            <Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "condición estable" : poolState === "warning" ? "requiere atención" : "condición crítica"}</Badge>
+          </div>
         </div>
         <div className="virtual-pool-layout">
           <div className={`virtual-pool virtual-pool-${poolState}`}>
+            <div className="pool-current pool-current-one" />
+            <div className="pool-current pool-current-two" />
             <div className="pool-water-rings"><span /><span /><span /></div>
             <div className="pool-aerator"><i /><i /><i /><i /><i /></div>
-            <div className="pool-fish fish-one">›</div>
-            <div className="pool-fish fish-two">›</div>
-            <div className="pool-fish fish-three">›</div>
-            <div className="pool-fish fish-four">›</div>
+            <div className="pool-fish fish-one"><i /><b /></div>
+            <div className="pool-fish fish-two"><i /><b /></div>
+            <div className="pool-fish fish-three"><i /><b /></div>
+            <div className="pool-fish fish-four"><i /><b /></div>
+            <div className="pool-fish fish-five"><i /><b /></div>
+            <div className="pool-fish fish-six"><i /><b /></div>
             <div className="pool-core">
               <Droplet size={28} />
               <strong>{formatNumber(oxygen, 2)} mg/L</strong>
@@ -598,10 +616,16 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             <span className="pool-sensor pool-sensor-c">S3</span>
           </div>
           <div className="pool-live-panel">
-            <div><span>Temperatura</span><strong>{formatNumber(temperature, 2)} °C</strong><small>{formatNumber(trends.water_temperature_c, 4)} / hora</small></div>
-            <div><span>pH</span><strong>{formatNumber(ph, 2)}</strong><small>{formatNumber(trends.ph, 4)} / hora</small></div>
-            <div><span>Nitrato</span><strong>{formatNumber(nitrate, 2)}</strong><small>{formatNumber(trends.nitrate_ion, 4)} / hora</small></div>
-            <div><span>Modelos integrados</span><strong>{selectedModels.length}</strong><small>{participation.filter((item) => text(item.status) === "available").length} disponibles</small></div>
+            {liveMeasurementCards.map((measurement) => (
+              <div className="pool-live-card" key={measurement.code}>
+                <div className="pool-live-card-head"><span>{measurement.label}</span><Badge kind={text(baselineQualityFlags[measurement.code]) === "valid" ? "success" : "warning"}>{text(baselineQualityFlags[measurement.code], "sin dato")}</Badge></div>
+                <strong>{formatNumber(measurement.value, 2)} <em>{text(baselineUnits[measurement.code], measurement.fallbackUnit)}</em></strong>
+                <small>Medido: {formatDateTime(baselineObservedAt[measurement.code])}</small>
+                <small>Guardado en BD: {formatDateTime(baselineIngestedAt[measurement.code])}</small>
+                <small>Tendencia usada: {formatNumber(trends[measurement.code], 4)} / hora</small>
+              </div>
+            ))}
+            <div className="pool-model-summary"><span>Modelos integrados</span><strong>{selectedModels.length}</strong><small>{participation.filter((item) => text(item.status) === "available").length} disponibles para este escenario</small></div>
           </div>
         </div>
       </section>
@@ -695,7 +719,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
           <h2>BASE REAL Y TENDENCIA OBSERVADA</h2>
-          <DataTable rows={Object.keys(baseline).map((variable) => ({ variable, valor_actual: baseline[variable], tendencia_por_hora: trends[variable], origen: "clean_measurements" }))} columns={["variable", "valor_actual", "tendencia_por_hora", "origen"]} />
+          <DataTable rows={Object.keys(baseline).map((variable) => ({ variable, valor_actual: baseline[variable], unidad: baselineUnits[variable], medido_en: baselineObservedAt[variable], guardado_en_bd: baselineIngestedAt[variable], tendencia_por_hora: trends[variable], origen: "clean_measurements" }))} columns={["variable", "valor_actual", "unidad", "medido_en", "guardado_en_bd", "tendencia_por_hora", "origen"]} />
         </div>
         <div className="studio-card mlops-card">
           <h2>INJERENCIA Y DISPONIBILIDAD</h2>
@@ -716,6 +740,13 @@ function formatHourLabel(value: unknown) {
   const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return text(value)
   return date.toLocaleString("es-PE", { day: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+function formatDateTime(value: unknown) {
+  if (!value) return "sin registro"
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return text(value, "sin registro")
+  return date.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
 export function LegacyModelDashboardReference({ dashboard, dashboardError, selectedPondId, onNavigate }: { dashboard: Row; dashboardError: unknown; selectedPondId: string; onNavigate: (screen: MlopsScreen) => void }) {

@@ -3385,6 +3385,7 @@
 .aquatwin-studio .virtual-pool {
   position: relative;
   isolation: isolate;
+  overflow: hidden;
   min-height: 360px;
   margin: 12px 34px 24px;
   border: 12px solid #dce7f5;
@@ -3395,6 +3396,34 @@
     linear-gradient(145deg, #38bdf8, #0ea5e9 52%, #0284c7);
   box-shadow: inset 0 0 0 5px #fff, inset 0 -28px 50px rgba(3, 105, 161, 0.24), 0 18px 32px rgba(14, 116, 144, 0.18);
 }
+
+.aquatwin-studio .virtual-pool::before,
+.aquatwin-studio .virtual-pool::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  width: 78%;
+  height: 42%;
+  border-radius: 50%;
+  background: rgba(255,255,255,.12);
+  filter: blur(2px);
+  animation: pool-water-flow 9s ease-in-out infinite alternate;
+}
+.aquatwin-studio .virtual-pool::before { top: -14%; left: -12%; }
+.aquatwin-studio .virtual-pool::after { right: -14%; bottom: -14%; animation-delay: -4s; animation-direction: alternate-reverse; }
+
+.aquatwin-studio .pool-current {
+  position: absolute;
+  z-index: 1;
+  width: 42%;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255,255,255,.24);
+  border-left-color: transparent;
+  border-radius: 50%;
+  animation: pool-current-spin 8s linear infinite;
+}
+.aquatwin-studio .pool-current-one { top: 12%; left: 10%; }
+.aquatwin-studio .pool-current-two { right: 9%; bottom: 8%; width: 34%; animation-direction: reverse; animation-duration: 11s; }
 
 .aquatwin-studio .virtual-pool-warning {
   background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.5), transparent 22%), repeating-radial-gradient(ellipse at center, rgba(255,255,255,.28) 0 2px, transparent 3px 34px), linear-gradient(145deg, #67e8f9, #0ea5e9 50%, #f59e0b);
@@ -3409,9 +3438,10 @@
   inset: 18%;
   border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 50%;
+  animation: pool-ring-pulse 4s ease-out infinite;
 }
-.aquatwin-studio .pool-water-rings span:nth-child(2) { inset: 28%; }
-.aquatwin-studio .pool-water-rings span:nth-child(3) { inset: 38%; }
+.aquatwin-studio .pool-water-rings span:nth-child(2) { inset: 28%; animation-delay: -1.3s; }
+.aquatwin-studio .pool-water-rings span:nth-child(3) { inset: 38%; animation-delay: -2.6s; }
 
 .aquatwin-studio .pool-core {
   position: absolute;
@@ -3436,16 +3466,43 @@
 .aquatwin-studio .pool-fish {
   position: absolute;
   z-index: 2;
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 42px;
-  font-weight: 300;
-  line-height: 1;
-  text-shadow: 0 3px 8px rgba(3, 105, 161, 0.22);
+  width: 44px;
+  height: 20px;
+  filter: drop-shadow(0 4px 4px rgba(3, 105, 161, .25));
 }
-.aquatwin-studio .fish-one { top: 22%; left: 24%; transform: rotate(15deg); }
-.aquatwin-studio .fish-two { top: 30%; right: 21%; transform: rotate(150deg); }
-.aquatwin-studio .fish-three { bottom: 19%; left: 34%; transform: rotate(-25deg); }
-.aquatwin-studio .fish-four { bottom: 24%; right: 29%; transform: rotate(195deg); }
+.aquatwin-studio .pool-fish i {
+  position: absolute;
+  inset: 2px 8px 2px 0;
+  border-radius: 55% 45% 45% 55%;
+  background: rgba(255, 255, 255, .84);
+}
+.aquatwin-studio .pool-fish i::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #075985;
+}
+.aquatwin-studio .pool-fish b {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  width: 14px;
+  height: 16px;
+  background: rgba(255,255,255,.72);
+  clip-path: polygon(100% 0, 25% 50%, 100% 100%);
+  transform-origin: left center;
+  animation: fish-tail 0.65s ease-in-out infinite alternate;
+}
+.aquatwin-studio .fish-one { animation: fish-swim-one 13s linear infinite; }
+.aquatwin-studio .fish-two { animation: fish-swim-two 17s linear infinite -5s; }
+.aquatwin-studio .fish-three { animation: fish-swim-three 15s linear infinite -9s; }
+.aquatwin-studio .fish-four { animation: fish-swim-four 19s linear infinite -3s; }
+.aquatwin-studio .fish-five { animation: fish-swim-two 22s linear infinite -13s; scale: .72; }
+.aquatwin-studio .fish-six { animation: fish-swim-one 24s linear infinite -17s; scale: .62; }
 
 .aquatwin-studio .pool-aerator {
   position: absolute;
@@ -3463,12 +3520,17 @@
   height: 9px;
   border: 2px solid rgba(255,255,255,.82);
   border-radius: 50%;
+  animation: aerator-bubble 2.2s ease-out infinite;
 }
 .aquatwin-studio .pool-aerator i:nth-child(1) { left: 28px; top: 6px; }
 .aquatwin-studio .pool-aerator i:nth-child(2) { right: 10px; top: 23px; }
 .aquatwin-studio .pool-aerator i:nth-child(3) { right: 19px; bottom: 10px; }
 .aquatwin-studio .pool-aerator i:nth-child(4) { left: 10px; bottom: 18px; }
 .aquatwin-studio .pool-aerator i:nth-child(5) { left: 27px; top: 28px; }
+.aquatwin-studio .pool-aerator i:nth-child(2) { animation-delay: -.4s; }
+.aquatwin-studio .pool-aerator i:nth-child(3) { animation-delay: -.8s; }
+.aquatwin-studio .pool-aerator i:nth-child(4) { animation-delay: -1.2s; }
+.aquatwin-studio .pool-aerator i:nth-child(5) { animation-delay: -1.6s; }
 
 .aquatwin-studio .pool-sensor {
   position: absolute;
@@ -3502,6 +3564,14 @@
   border-radius: 7px;
   background: #fff;
 }
+.aquatwin-studio .pool-live-card { border-left-color: #0ea5e9; }
+.aquatwin-studio .pool-live-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.aquatwin-studio .pool-live-card strong em { color: #718098; font-size: 11px; font-style: normal; font-weight: 700; }
+.aquatwin-studio .pool-live-card small + small { margin-top: 4px; }
+.aquatwin-studio .pool-model-summary { border-left-color: #16a34a !important; }
+.aquatwin-studio .pool-sync-state { display: flex; align-items: flex-end; flex-direction: column; gap: 4px; }
+.aquatwin-studio .pool-sync-state span { color: #718098; font-size: 9px; text-transform: uppercase; }
+.aquatwin-studio .pool-sync-state strong { color: #1b2941; font-size: 11px; }
 .aquatwin-studio .pool-live-panel span,
 .aquatwin-studio .pool-live-panel strong,
 .aquatwin-studio .pool-live-panel small { display: block; }
@@ -3522,6 +3592,57 @@
   border: 1px solid #fde68a;
   border-radius: 6px;
   background: #fffbeb;
+}
+
+@keyframes pool-water-flow {
+  from { transform: translate3d(-4%, -2%, 0) rotate(-8deg) scale(1); }
+  to { transform: translate3d(22%, 18%, 0) rotate(8deg) scale(1.18); }
+}
+@keyframes pool-current-spin { to { transform: rotate(360deg); } }
+@keyframes pool-ring-pulse {
+  0% { opacity: .2; transform: scale(.82); }
+  50% { opacity: .75; }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+@keyframes aerator-bubble {
+  0% { opacity: .2; transform: translateY(8px) scale(.55); }
+  70% { opacity: .9; }
+  100% { opacity: 0; transform: translateY(-28px) scale(1.4); }
+}
+@keyframes fish-tail { to { transform: scaleX(.58); } }
+@keyframes fish-swim-one {
+  0% { left: 8%; top: 24%; transform: rotate(8deg); }
+  45% { left: 72%; top: 38%; transform: rotate(18deg); }
+  50% { left: 74%; top: 42%; transform: rotate(188deg); }
+  95% { left: 11%; top: 64%; transform: rotate(198deg); }
+  100% { left: 8%; top: 24%; transform: rotate(368deg); }
+}
+@keyframes fish-swim-two {
+  0% { left: 18%; top: 72%; transform: rotate(-12deg); }
+  42% { left: 70%; top: 58%; transform: rotate(-22deg); }
+  50% { left: 73%; top: 51%; transform: rotate(158deg); }
+  92% { left: 22%; top: 18%; transform: rotate(202deg); }
+  100% { left: 18%; top: 72%; transform: rotate(348deg); }
+}
+@keyframes fish-swim-three {
+  0% { left: 30%; top: 13%; transform: rotate(22deg); }
+  46% { left: 69%; top: 68%; transform: rotate(62deg); }
+  52% { left: 66%; top: 70%; transform: rotate(215deg); }
+  94% { left: 15%; top: 42%; transform: rotate(188deg); }
+  100% { left: 30%; top: 13%; transform: rotate(382deg); }
+}
+@keyframes fish-swim-four {
+  0% { left: 68%; top: 22%; transform: rotate(168deg); }
+  43% { left: 20%; top: 37%; transform: rotate(188deg); }
+  50% { left: 18%; top: 42%; transform: rotate(358deg); }
+  92% { left: 64%; top: 70%; transform: rotate(390deg); }
+  100% { left: 68%; top: 22%; transform: rotate(528deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aquatwin-studio .virtual-pool *,
+  .aquatwin-studio .virtual-pool::before,
+  .aquatwin-studio .virtual-pool::after { animation-play-state: paused !important; }
 }
 
 @media (max-width: 1280px) {
