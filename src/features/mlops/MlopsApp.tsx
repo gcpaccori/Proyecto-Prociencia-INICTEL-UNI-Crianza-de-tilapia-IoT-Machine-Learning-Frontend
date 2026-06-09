@@ -42,7 +42,7 @@ import type { ViewContext } from "@/App"
 import { apiGet, apiPost } from "@/lib/api"
 import { pickId, pickName, query, unwrapList, unwrapObject, type Row } from "@/lib/normalize"
 
-type MlopsScreen = "summary" | "data" | "cleaning" | "features" | "training" | "artifacts" | "models" | "traceability"
+type MlopsScreen = "summary" | "data" | "cleaning" | "features" | "training" | "artifacts" | "models" | "digitalTwin" | "traceability"
 type StatusKind = "success" | "warning" | "info" | "danger" | "purple" | "neutral"
 
 const defaultPond = "LEGACY-POND-1"
@@ -270,13 +270,14 @@ export function MlopsApp({ selectedFarmId, selectedPondId, onFarmChange, onPondC
       <div className="studio-shell">
         <MlopsSidebar active={screen} onChange={setScreen} dashboard={dashboard} />
         <main className="studio-workspace">
-          {screen === "summary" ? <SummaryView dashboard={dashboard} dashboardError={dashboardQuery.error} selectedPondId={activePondId} onNavigate={setScreen} /> : null}
+          {screen === "summary" ? <OperationalSummaryView dashboard={dashboard} dashboardError={dashboardQuery.error} selectedPondId={activePondId} onNavigate={setScreen} /> : null}
           {screen === "data" ? <DataView selectedPondId={activePondId} /> : null}
           {screen === "cleaning" ? <CleaningView selectedPondId={activePondId} /> : null}
           {screen === "features" ? <FeaturesView selectedPondId={activePondId} /> : null}
           {screen === "training" ? <TrainingView selectedPondId={activePondId} /> : null}
           {screen === "artifacts" ? <ArtifactsView /> : null}
           {screen === "models" ? <ModelLifecycleView selectedPondId={activePondId} /> : null}
+          {screen === "digitalTwin" ? <DigitalTwinStudioView selectedPondId={activePondId} /> : null}
           {screen === "traceability" ? <TraceabilityView dashboard={dashboard} /> : null}
         </main>
       </div>
@@ -385,6 +386,7 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
     { id: "training", label: "Entrenar", Icon: Brain },
     { id: "artifacts", label: "Artefactos", Icon: Boxes },
     { id: "models", label: "Modelos ML", Icon: Rocket },
+    { id: "digitalTwin", label: "Gemelo digital", Icon: Waves },
     { id: "traceability", label: "Trazabilidad", Icon: ClipboardList },
   ]
   const metrics = row(dashboard.system_metrics)
@@ -419,7 +421,218 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
   )
 }
 
-function SummaryView({ dashboard, dashboardError, selectedPondId, onNavigate }: { dashboard: Row; dashboardError: unknown; selectedPondId: string; onNavigate: (screen: MlopsScreen) => void }) {
+function OperationalSummaryView({
+  dashboard,
+  dashboardError,
+  selectedPondId,
+  onNavigate,
+}: {
+  dashboard: Row
+  dashboardError: unknown
+  selectedPondId: string
+  onNavigate: (screen: MlopsScreen) => void
+}) {
+  const coverageQuery = useQuery({ queryKey: ["summary-coverage", selectedPondId], queryFn: () => apiGet<unknown>(query("/datasets/coverage", { pond_id: selectedPondId })), refetchInterval: 30_000 })
+  const runsQuery = useQuery({ queryKey: ["summary-cleaning-runs"], queryFn: () => apiGet<unknown>("/data/cleaning-runs"), refetchInterval: 30_000 })
+  const featuresQuery = useQuery({ queryKey: ["summary-feature-sets"], queryFn: () => apiGet<unknown>("/features"), refetchInterval: 30_000 })
+  const jobsQuery = useQuery({ queryKey: ["summary-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs"), refetchInterval: 30_000 })
+  const assetsQuery = useQuery({ queryKey: ["summary-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { include_payload: false })), refetchInterval: 30_000 })
+  const stateQuery = useQuery({ queryKey: ["summary-pond-state", selectedPondId], queryFn: () => apiGet<unknown>(`/ponds/${selectedPondId}/state`), refetchInterval: 30_000 })
+  const coverage = row(coverageQuery.data)
+  const currentWater = row(row(stateQuery.data).water_quality_current)
+  const variables = rows(coverage.variables)
+  const cleaningRuns = rows(runsQuery.data)
+  const featureSets = rows(featuresQuery.data)
+  const jobs = rows(jobsQuery.data)
+  const assets = rows(assetsQuery.data)
+  const completedJobs = jobs.filter((item) => text(item.status, "") === "completed")
+  const activeAssets = assets.filter((item) => text(item.status, "") === "active")
+  const workflow = [
+    { title: "Datos reales", value: formatNumber(coverage.total_records, 0), detail: `${variables.length} variables observadas`, screen: "data" as MlopsScreen, kind: variables.length ? "success" : "warning" },
+    { title: "Limpiezas guardadas", value: cleaningRuns.length, detail: "Copias versionadas sin tocar origen", screen: "cleaning" as MlopsScreen, kind: cleaningRuns.length ? "success" : "warning" },
+    { title: "Feature sets", value: featureSets.length, detail: "Matrices preparadas para entrenar", screen: "features" as MlopsScreen, kind: featureSets.length ? "success" : "warning" },
+    { title: "Entrenamientos", value: completedJobs.length, detail: `${jobs.length} jobs registrados`, screen: "training" as MlopsScreen, kind: completedJobs.length ? "success" : "warning" },
+    { title: "Modelos productivos", value: activeAssets.length, detail: `${assets.length} artefactos versionados`, screen: "models" as MlopsScreen, kind: activeAssets.length ? "success" : "warning" },
+    { title: "Gemelo digital", value: "En vivo", detail: "Escenarios horarios y modelos activables", screen: "digitalTwin" as MlopsScreen, kind: "info" },
+  ]
+  const waterRows = Object.entries(currentWater).map(([variable_code, raw]) => {
+    const item = row(raw)
+    return { variable_code, value: item.value, unit: item.unit, quality_flag: item.quality_flag, source: "clean_measurements" }
+  })
+  return (
+    <>
+      <section className="page-head command-head">
+        <div>
+          <h1>Resumen operativo</h1>
+          <p>Estado real del estanque {selectedPondId}, preparación de datos, modelos y gemelo digital.</p>
+        </div>
+        <Badge kind={text(row(dashboard.backend).status, "") === "online" ? "success" : "warning"}>API {text(row(dashboard.backend).status, "revisar")}</Badge>
+      </section>
+      <ErrorNote error={dashboardError ?? coverageQuery.error ?? runsQuery.error ?? featuresQuery.error ?? jobsQuery.error ?? assetsQuery.error ?? stateQuery.error} />
+      <section className="operational-summary-grid">
+        {workflow.map((item) => (
+          <button type="button" className={`operational-summary-item operational-summary-${item.kind}`} key={item.title} onClick={() => onNavigate(item.screen)}>
+            <span>{item.title}</span>
+            <strong>{item.value}</strong>
+            <small>{item.detail}</small>
+          </button>
+        ))}
+      </section>
+      <section className="mlops-grid two">
+        <div className="studio-card mlops-card">
+          <div className="card-head">
+            <div><h2>ESTADO ACTUAL DE LA PISCINA</h2><p className="soft">Últimas mediciones limpias provenientes de la base operativa.</p></div>
+            <button type="button" className="mini-btn mini-btn-primary" onClick={() => onNavigate("digitalTwin")}>Abrir gemelo digital</button>
+          </div>
+          <DataTable rows={waterRows} columns={["variable_code", "value", "unit", "quality_flag", "source"]} />
+        </div>
+        <div className="studio-card mlops-card">
+          <div className="card-head">
+            <div><h2>SIGUIENTE ACCIÓN RECOMENDADA</h2><p className="soft">El resumen no fija un modelo: guía según el estado real del ciclo.</p></div>
+          </div>
+          <div className="check-list">
+            <div><CheckCircle2 /><span>Datos</span><strong>{variables.length ? "disponibles" : "sin cobertura"}</strong></div>
+            <div><CheckCircle2 /><span>Copias limpias</span><strong>{cleaningRuns.length ? "versionadas" : "crear limpieza"}</strong></div>
+            <div><CheckCircle2 /><span>Entrenamiento</span><strong>{completedJobs.length ? "candidatos disponibles" : "pendiente"}</strong></div>
+            <div><CheckCircle2 /><span>Simulación</span><strong>lista para configurar</strong></div>
+          </div>
+          <button type="button" className="primary-action" onClick={() => onNavigate(cleaningRuns.length ? "digitalTwin" : "cleaning")}>
+            {cleaningRuns.length ? "Configurar escenario del gemelo" : "Crear primera limpieza"}
+          </button>
+        </div>
+      </section>
+    </>
+  )
+}
+
+function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
+  const [horizonHours, setHorizonHours] = useState(24)
+  const [selectedModels, setSelectedModels] = useState<string[]>([])
+  const [adjustments, setAdjustments] = useState<Record<string, number>>({
+    dissolved_oxygen_mg_l: 0,
+    water_temperature_c: 0,
+    ph: 0,
+    nitrate_ion: 0,
+  })
+  const catalogQuery = useQuery({ queryKey: ["twin-model-catalog"], queryFn: () => apiGet<unknown>("/models") })
+  const assetsQuery = useQuery({ queryKey: ["twin-active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })) })
+  const catalog = rows(catalogQuery.data)
+  const assets = rows(assetsQuery.data)
+  const availableModels = useMemo(() => {
+    const codes = new Set<string>()
+    catalog.forEach((item) => codes.add(text(item.model_code, "")))
+    assets.forEach((item) => codes.add(text(item.model_code, "")))
+    return Array.from(codes).filter(Boolean)
+  }, [assets, catalog])
+  useEffect(() => {
+    if (selectedModels.length || !availableModels.length) return
+    const preferred = ["DO_DYNAMIC_0D_ROYER_2021", "RAS_OXYGEN_BALANCE", "PEARSON_LSTM_ATTENTION_WQ", "YI_ENVIRONMENTAL_GROWTH", "BIOENERGETIC_SPARUS_AURATA_BRIGOLIN_2010"]
+    setSelectedModels(preferred.filter((code) => availableModels.includes(code)))
+  }, [availableModels, selectedModels.length])
+  const projectionQuery = useQuery({
+    queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments],
+    queryFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/projection`, {
+      horizon_hours: horizonHours,
+      step_hours: horizonHours <= 24 ? 1 : 3,
+      selected_models: selectedModels,
+      variable_adjustments_per_hour: adjustments,
+    }),
+    enabled: Boolean(selectedPondId),
+    refetchInterval: 30_000,
+  })
+  const projection = row(projectionQuery.data)
+  const baseline = row(projection.baseline_values)
+  const trends = row(projection.observed_trends_per_hour)
+  const chartRows = rows(projection.points).map((point) => {
+    const values = row(point.values)
+    return {
+      hour: formatHourLabel(point.timestamp),
+      ...values,
+    }
+  })
+  const participation = rows(projection.model_participation)
+  const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
+  return (
+    <>
+      <section className="page-head command-head">
+        <div>
+          <h1>Gemelo digital de la piscina</h1>
+          <p>Clon virtual en vivo: compara la tendencia real con cambios operativos explícitos.</p>
+        </div>
+        <Badge kind={projectionQuery.isFetching ? "info" : "success"}>{projectionQuery.isFetching ? "actualizando" : "sincronizado"}</Badge>
+      </section>
+      <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error} />
+      <section className="twin-control-grid">
+        <div className="studio-card mlops-card twin-controls">
+          <div className="card-head"><div><h2>ESCENARIO</h2><p className="soft">Los cambios son incrementos por hora y quedan identificados como simulación.</p></div><JsonButton label="Trazabilidad completa del escenario" value={projection} /></div>
+          <div className="time-tabs interactive-time-tabs">
+            {[12, 24, 48, 72].map((hours) => <button type="button" className={horizonHours === hours ? "active" : ""} key={hours} onClick={() => setHorizonHours(hours)}>{hours}H</button>)}
+          </div>
+          <div className="field-grid">
+            {Object.keys(adjustments).map((variable) => (
+              <label className="form-line" key={variable}>
+                <span>{variable} / hora</span>
+                <input type="number" step="0.01" value={adjustments[variable]} onChange={(event) => setAdjustments((current) => ({ ...current, [variable]: Number(event.target.value) }))} />
+              </label>
+            ))}
+          </div>
+          <button type="button" className="outline-action native-wide" onClick={() => setAdjustments({ dissolved_oxygen_mg_l: 0, water_temperature_c: 0, ph: 0, nitrate_ion: 0 })}>Restablecer escenario real</button>
+        </div>
+        <div className="studio-card mlops-card twin-models">
+          <div className="card-head"><div><h2>MODELOS QUE PARTICIPAN</h2><p className="soft">Active o desactive modelos y revise su injerencia declarada.</p></div><Badge kind="info">{selectedModels.length} activos</Badge></div>
+          <div className="twin-model-list">
+            {availableModels.map((modelCode) => {
+              const active = selectedModels.includes(modelCode)
+              return <button type="button" className={active ? "twin-model active" : "twin-model"} key={modelCode} onClick={() => toggleModel(modelCode)}>
+                <span>{active ? "ON" : "OFF"}</span><div><strong>{modelTitle(modelCode)}</strong><small>{modelPurpose(modelCode)}</small></div>
+              </button>
+            })}
+          </div>
+        </div>
+      </section>
+      <section className="studio-card mlops-card twin-chart-card">
+        <div className="card-head"><div><h2>PROYECCIÓN HORARIA DEL ESTANQUE</h2><p className="soft">Eje temporal real. Datos base: clean_measurements; escenario: cambios marcados por el operador.</p></div><Badge kind="warning">escenario operacional</Badge></div>
+        <ResponsiveContainer width="100%" height={430}>
+          <LineChart data={chartRows} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+            <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip formatter={(value) => formatNumber(value, 4)} />
+            <Legend />
+            <Line type="monotone" dataKey="dissolved_oxygen_mg_l" name="Oxígeno disuelto" stroke="#1976ff" strokeWidth={3} dot={false} />
+            <Line type="monotone" dataKey="water_temperature_c" name="Temperatura" stroke="#ef4444" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="ph" name="pH" stroke="#16a34a" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="nitrate_ion" name="Nitrato" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </section>
+      <section className="mlops-grid two">
+        <div className="studio-card mlops-card">
+          <h2>BASE REAL Y TENDENCIA OBSERVADA</h2>
+          <DataTable rows={Object.keys(baseline).map((variable) => ({ variable, valor_actual: baseline[variable], tendencia_por_hora: trends[variable], origen: "clean_measurements" }))} columns={["variable", "valor_actual", "tendencia_por_hora", "origen"]} />
+        </div>
+        <div className="studio-card mlops-card">
+          <h2>INJERENCIA Y DISPONIBILIDAD</h2>
+          <DataTable rows={participation} columns={["model_code", "status", "impact_variables", "asset_id", "explanation"]} />
+        </div>
+      </section>
+      <section className="studio-card mlops-card">
+        <h2>ADVERTENCIAS DE INTERPRETACIÓN</h2>
+        <div className="check-list">
+          {(Array.isArray(projection.warnings) ? projection.warnings : []).map((warning) => <div key={String(warning)}><AlertTriangle /><span>{String(warning)}</span><strong>revisar</strong></div>)}
+        </div>
+      </section>
+    </>
+  )
+}
+
+function formatHourLabel(value: unknown) {
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return text(value)
+  return date.toLocaleString("es-PE", { day: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+export function LegacyModelDashboardReference({ dashboard, dashboardError, selectedPondId, onNavigate }: { dashboard: Row; dashboardError: unknown; selectedPondId: string; onNavigate: (screen: MlopsScreen) => void }) {
   const lifecycleQuery = useQuery({ queryKey: ["ml-lifecycle"], queryFn: () => apiGet<unknown>("/ml/lifecycle/status"), refetchInterval: 30_000 })
   const trainableQuery = useQuery({ queryKey: ["summary-trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models"), refetchInterval: 30_000 })
   const assetsQuery = useQuery({ queryKey: ["summary-active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })), refetchInterval: 30_000 })
@@ -841,6 +1054,7 @@ function DataView({ selectedPondId }: { selectedPondId: string }) {
   const queryClient = useQueryClient()
   const [readinessModel, setReadinessModel] = useState(defaultModel)
   const sourcesQuery = useQuery({ queryKey: ["dataset-sources"], queryFn: () => apiGet<unknown>("/datasets/sources") })
+  const trainableQuery = useQuery({ queryKey: ["data-trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models") })
   const coverageQuery = useQuery({ queryKey: ["dataset-coverage", selectedPondId], queryFn: () => apiGet<unknown>(query("/datasets/coverage", { pond_id: selectedPondId })) })
   const variablesQuery = useQuery({ queryKey: ["dataset-variables", selectedPondId], queryFn: () => apiGet<unknown>(query("/datasets/variables", { pond_id: selectedPondId })) })
   const readinessQuery = useQuery({
@@ -857,21 +1071,22 @@ function DataView({ selectedPondId }: { selectedPondId: string }) {
   const coverage = unwrapObject(coverageQuery.data)
   const variables = getVariables(coverageQuery.data, variablesQuery.data)
   const readiness = unwrapObject(readinessQuery.data)
+  const readinessModels = rows(trainableQuery.data).map((item) => text(item.model_code, "")).filter(Boolean)
 
   return (
     <>
       <section className="page-head">
         <h1>DATOS Y COBERTURA</h1>
-        <p>Conecta la data legacy y valida si el estanque tiene variables entrenables suficientes.</p>
+        <p>Crea y actualiza una copia de trabajo desde la base operativa sin modificar los datos originales.</p>
       </section>
       <section className="filter-bar mlops-toolbar">
         <button type="button" className="primary-action" disabled={syncMutation.isPending} onClick={() => syncMutation.mutate()}>
-          <RefreshCcw size={16} /> {syncMutation.isPending ? "Sincronizando" : "Sincronizar legacy"}
+          <RefreshCcw size={16} /> {syncMutation.isPending ? "Actualizando copia" : "Actualizar copia desde base operativa"}
         </button>
         <label className="select-box">
-          <span>Modelo ML</span>
+          <span>Comprobar requisitos de</span>
           <select value={readinessModel} onChange={(event) => setReadinessModel(event.target.value)}>
-            {[defaultModel, "BPNN_MEA_FEED_INTAKE", "PEARSON_LSTM_ATTENTION_WQ"].map((model) => (
+            {(readinessModels.length ? readinessModels : [defaultModel]).map((model) => (
               <option key={model}>{model}</option>
             ))}
           </select>
@@ -879,10 +1094,10 @@ function DataView({ selectedPondId }: { selectedPondId: string }) {
         </label>
         <JsonButton label="Fuentes dataset" value={sourcesQuery.data} />
       </section>
-      <ErrorNote error={sourcesQuery.error ?? coverageQuery.error ?? variablesQuery.error ?? readinessQuery.error ?? syncMutation.error} />
+      <ErrorNote error={sourcesQuery.error ?? trainableQuery.error ?? coverageQuery.error ?? variablesQuery.error ?? readinessQuery.error ?? syncMutation.error} />
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
-          <h2>READINESS PARA ENTRENAMIENTO</h2>
+          <h2>¿ALCANZAN LOS DATOS PARA ESTE MODELO?</h2>
           <div className="acceptance">
             {readiness.can_train ? <CheckCircle2 /> : <AlertTriangle />}
             <div>
@@ -890,7 +1105,7 @@ function DataView({ selectedPondId }: { selectedPondId: string }) {
               <span>{Array.isArray(readiness.missing_variables) ? `Faltan: ${readiness.missing_variables.join(", ")}` : "Validacion de variables requeridas"}</span>
             </div>
           </div>
-          <MetricList rows={[["Total registros", coverage.total_records], ["Variables entrenables", rows(coverage.trainable_variables).length || text(coverage.trainable_variables, "0")], ["Modelo", readinessModel]]} />
+          <MetricList rows={[["Registros copiados", coverage.total_records], ["Variables utilizables", Array.isArray(coverage.trainable_variables) ? coverage.trainable_variables.length : 0], ["Modelo comprobado", readinessModel], ["Datos originales", "solo lectura"]]} />
         </div>
         <div className="studio-card mlops-card">
           <h2>VARIABLES DISPONIBLES</h2>
