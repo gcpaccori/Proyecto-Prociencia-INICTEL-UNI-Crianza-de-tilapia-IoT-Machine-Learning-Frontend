@@ -13,9 +13,12 @@ import {
   Database,
   Droplet,
   FileJson,
+  Fish,
   FlaskConical,
+  Gauge,
   Home,
   LineChart as LineChartIcon,
+  Power,
   RefreshCcw,
   Rocket,
   Settings,
@@ -511,6 +514,7 @@ function OperationalSummaryView({
 }
 
 function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
+  const queryClient = useQueryClient()
   const [horizonHours, setHorizonHours] = useState(24)
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelsInitialized, setModelsInitialized] = useState(false)
@@ -520,8 +524,20 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     ph: 0,
     nitrate_ion: 0,
   })
+  const [operationalControls, setOperationalControls] = useState<Record<string, number | boolean | string>>({
+    fish_count: 25,
+    aeration_percent: 60,
+    filtration_percent: 50,
+    temperature_setpoint_c: 24,
+    feeding_mode: "automatic",
+    feed_events: 0,
+    siphon_events: 0,
+  })
   const catalogQuery = useQuery({ queryKey: ["twin-model-catalog"], queryFn: () => apiGet<unknown>("/models") })
   const assetsQuery = useQuery({ queryKey: ["twin-active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })) })
+  const latestSnapshotQuery = useQuery({ queryKey: ["twin-latest-snapshot", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/latest`), enabled: Boolean(selectedPondId), retry: false, refetchInterval: 30_000 })
+  const risksQuery = useQuery({ queryKey: ["twin-risks", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/risks`), enabled: Boolean(selectedPondId), refetchInterval: 30_000 })
+  const recommendationsQuery = useQuery({ queryKey: ["twin-recommendations", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/recommendations`), enabled: Boolean(selectedPondId), refetchInterval: 30_000 })
   const catalog = rows(catalogQuery.data)
   const assets = rows(assetsQuery.data)
   const availableModels = useMemo(() => {
@@ -542,9 +558,18 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
       step_hours: horizonHours <= 24 ? 1 : 3,
       selected_models: selectedModels,
       variable_adjustments_per_hour: adjustments,
+      operational_controls: operationalControls,
     }),
     enabled: Boolean(selectedPondId),
     refetchInterval: 30_000,
+  })
+  const snapshotMutation = useMutation({
+    mutationFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/snapshot`, { operational_constraints: operationalControls }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["twin-latest-snapshot", selectedPondId] })
+      queryClient.invalidateQueries({ queryKey: ["twin-risks", selectedPondId] })
+      queryClient.invalidateQueries({ queryKey: ["twin-recommendations", selectedPondId] })
+    },
   })
   const projection = row(projectionQuery.data)
   const baseline = row(projection.baseline_values)
@@ -563,10 +588,16 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     }
   })
   const participation = rows(projection.model_participation)
+  const snapshot = row(snapshotMutation.data ?? latestSnapshotQuery.data)
+  const risks = rows(snapshot.risk_assessments).length ? rows(snapshot.risk_assessments) : rows(risksQuery.data)
+  const recommendations = rows(snapshot.recommendations).length ? rows(snapshot.recommendations) : rows(recommendationsQuery.data)
+  const modelOutputs = rows(snapshot.model_outputs)
   const oxygen = numberValue(baseline.dissolved_oxygen_mg_l)
   const temperature = numberValue(baseline.water_temperature_c)
   const ph = numberValue(baseline.ph)
   const nitrate = numberValue(baseline.nitrate_ion)
+  const ammonia = numberValue(baseline.ammonia_mg_l ?? baseline.tan_mg_l)
+  const turbidity = numberValue(baseline.turbidity_ntu)
   const poolState = oxygen > 0 && oxygen < 4 ? "critical" : oxygen > 0 && oxygen < 5 ? "warning" : "healthy"
   const liveMeasurementCards = [
     { code: "dissolved_oxygen_mg_l", label: "Oxígeno disuelto", value: oxygen, fallbackUnit: "mg/L" },
@@ -574,6 +605,8 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
     { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
   ]
+  const setOperationalControl = (key: string, value: number | boolean | string) => setOperationalControls((current) => ({ ...current, [key]: value }))
+  const registerOperation = (key: "feed_events" | "siphon_events") => setOperationalControls((current) => ({ ...current, [key]: numberValue(current[key]) + 1 }))
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
   return (
     <>
@@ -584,48 +617,67 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <Badge kind={projectionQuery.isFetching ? "info" : "success"}>{projectionQuery.isFetching ? "actualizando" : "sincronizado"}</Badge>
       </section>
-      <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error} />
-      <section className="studio-card virtual-pool-card">
-        <div className="card-head">
-          <div><h2>PISCINA VIRTUAL EN VIVO</h2><p className="soft">Lecturas reales de MySQL. Las proyecciones inferiores parten exactamente de estos valores y sus tendencias observadas.</p></div>
-          <div className="pool-sync-state">
-            <span>Escenario recalculado</span>
-            <strong>{formatDateTime(projection.generated_at)}</strong>
-            <Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "condición estable" : poolState === "warning" ? "requiere atención" : "condición crítica"}</Badge>
+      <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error ?? risksQuery.error ?? recommendationsQuery.error ?? snapshotMutation.error} />
+      <section className="ras-console-grid">
+        <div className="ras-console-column">
+          <div className="studio-card ras-panel">
+            <div className="card-head"><div><h2>MANDOS OPERATIVOS RAS</h2><p className="soft">Contexto trazable para ejecutar modelos y escenarios.</p></div><Gauge size={20} /></div>
+            <RasRange label="Peces en crianza" value={numberValue(operationalControls.fish_count)} min={3} max={200} unit="" onChange={(value) => setOperationalControl("fish_count", value)} />
+            <RasRange label="Aireación / inyección O₂" value={numberValue(operationalControls.aeration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("aeration_percent", value)} />
+            <RasRange label="Filtrado mecánico / biológico" value={numberValue(operationalControls.filtration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("filtration_percent", value)} />
+            <RasRange label="Temperatura objetivo" value={numberValue(operationalControls.temperature_setpoint_c)} min={12} max={34} step={0.5} unit=" °C" onChange={(value) => setOperationalControl("temperature_setpoint_c", value)} />
+            <div className="ras-operation-actions">
+              <button type="button" className="primary-action" onClick={() => registerOperation("feed_events")}><Fish size={15} /> Registrar alimentación</button>
+              <button type="button" className="outline-action" onClick={() => registerOperation("siphon_events")}><RefreshCcw size={15} /> Registrar sifonado</button>
+            </div>
+            <small className="ras-context-note">Los mandos quedan registrados como contexto. Solo los ajustes explícitos inferiores alteran numéricamente la curva.</small>
+          </div>
+          <div className="studio-card ras-panel">
+            <h2>TELEMETRÍA BIOQUÍMICA</h2>
+            <RasTelemetry label="Oxígeno disuelto" value={oxygen} unit="mg/L" max={12} warning={5} critical={3} available={baseline.dissolved_oxygen_mg_l !== undefined} />
+            <RasTelemetry label="Amoniaco / TAN" value={ammonia} unit="mg/L" max={0.1} warning={0.02} critical={0.05} reverse available={baseline.ammonia_mg_l !== undefined || baseline.tan_mg_l !== undefined} />
+            <RasTelemetry label="Turbidez" value={turbidity} unit="NTU" max={100} warning={20} critical={40} reverse available={baseline.turbidity_ntu !== undefined} />
           </div>
         </div>
-        <div className="virtual-pool-layout">
-          <div className={`virtual-pool virtual-pool-${poolState}`}>
-            <div className="pool-current pool-current-one" />
-            <div className="pool-current pool-current-two" />
-            <div className="pool-water-rings"><span /><span /><span /></div>
-            <div className="pool-aerator"><i /><i /><i /><i /><i /></div>
-            <div className="pool-fish fish-one"><i /><b /></div>
-            <div className="pool-fish fish-two"><i /><b /></div>
-            <div className="pool-fish fish-three"><i /><b /></div>
-            <div className="pool-fish fish-four"><i /><b /></div>
-            <div className="pool-fish fish-five"><i /><b /></div>
-            <div className="pool-fish fish-six"><i /><b /></div>
-            <div className="pool-core">
-              <Droplet size={28} />
-              <strong>{formatNumber(oxygen, 2)} mg/L</strong>
-              <span>Oxígeno disuelto</span>
-            </div>
-            <span className="pool-sensor pool-sensor-a">S1</span>
-            <span className="pool-sensor pool-sensor-b">S2</span>
-            <span className="pool-sensor pool-sensor-c">S3</span>
+        <div className="studio-card ras-tank-panel">
+          <div className="card-head"><div><h2>CÁMARA DE CULTIVO DIGITAL</h2><p className="soft">Estado real, dinámica visual y contexto operativo del escenario.</p></div><Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "estable" : poolState}</Badge></div>
+          <div className={`ras-cylinder-tank ras-cylinder-${poolState}`} style={{ "--fish-load": Math.min(100, numberValue(operationalControls.fish_count)) } as CSSProperties}>
+            <div className="ras-water-surface"><span /><span /><span /></div>
+            <div className="ras-inlet" />
+            <div className="ras-drain" />
+            <div className="ras-bubble-field">{Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ "--i": index } as CSSProperties} />)}</div>
+            <div className="ras-fish-field">{Array.from({ length: Math.min(18, Math.max(5, Math.round(numberValue(operationalControls.fish_count) / 4))) }).map((_, index) => <span key={index} style={{ "--i": index } as CSSProperties}><i /><b /></span>)}</div>
+            <div className="ras-tank-reading"><Droplet size={24} /><strong>{formatNumber(oxygen, 2)} mg/L</strong><span>OD real de MySQL</span></div>
           </div>
-          <div className="pool-live-panel">
-            {liveMeasurementCards.map((measurement) => (
-              <div className="pool-live-card" key={measurement.code}>
-                <div className="pool-live-card-head"><span>{measurement.label}</span><Badge kind={text(baselineQualityFlags[measurement.code]) === "valid" ? "success" : "warning"}>{text(baselineQualityFlags[measurement.code], "sin dato")}</Badge></div>
-                <strong>{formatNumber(measurement.value, 2)} <em>{text(baselineUnits[measurement.code], measurement.fallbackUnit)}</em></strong>
-                <small>Medido: {formatDateTime(baselineObservedAt[measurement.code])}</small>
-                <small>Guardado en BD: {formatDateTime(baselineIngestedAt[measurement.code])}</small>
-                <small>Tendencia usada: {formatNumber(trends[measurement.code], 4)} / hora</small>
-              </div>
-            ))}
-            <div className="pool-model-summary"><span>Modelos integrados</span><strong>{selectedModels.length}</strong><small>{participation.filter((item) => text(item.status) === "available").length} disponibles para este escenario</small></div>
+          <div className="ras-engineering-strip">
+            <div><span>Carga configurada</span><strong>{formatNumber(operationalControls.fish_count, 0)} peces</strong></div>
+            <div><span>Aireación</span><strong>{formatNumber(operationalControls.aeration_percent, 0)}%</strong></div>
+            <div><span>Filtración</span><strong>{formatNumber(operationalControls.filtration_percent, 0)}%</strong></div>
+            <div><span>Último dato</span><strong>{formatDateTime(baselineObservedAt.dissolved_oxygen_mg_l)}</strong></div>
+          </div>
+          <div className="pool-live-panel ras-live-measurements">
+            {liveMeasurementCards.map((measurement) => <div className="pool-live-card" key={measurement.code}><div className="pool-live-card-head"><span>{measurement.label}</span><Badge kind={text(baselineQualityFlags[measurement.code]) === "valid" ? "success" : "warning"}>{text(baselineQualityFlags[measurement.code], "sin dato")}</Badge></div><strong>{formatNumber(measurement.value, 2)} <em>{text(baselineUnits[measurement.code], measurement.fallbackUnit)}</em></strong><small>Medido: {formatDateTime(baselineObservedAt[measurement.code])}</small><small>Guardado: {formatDateTime(baselineIngestedAt[measurement.code])}</small></div>)}
+          </div>
+        </div>
+        <div className="ras-console-column">
+          <div className="studio-card ras-panel">
+            <div className="card-head"><div><h2>INTELIGENCIA DEL GEMELO</h2><p className="soft">Ejecuta modelos, riesgos y recomendaciones reales.</p></div><Brain size={20} /></div>
+            <button type="button" className="success-action native-wide" disabled={snapshotMutation.isPending} onClick={() => snapshotMutation.mutate()}><Power size={16} /> {snapshotMutation.isPending ? "Ejecutando modelos" : "Ejecutar snapshot inteligente"}</button>
+            <MetricList rows={[["Snapshot", snapshot.snapshot_id ?? "pendiente"], ["Modelos ejecutados", modelOutputs.length], ["Riesgos", risks.length], ["Recomendaciones", recommendations.length]]} />
+          </div>
+          <div className="studio-card ras-panel ras-event-log">
+            <h2>REGISTRO DE PROCESOS</h2>
+            <div><span>{formatDateTime(projection.generated_at)}</span><p>Proyección recalculada con datos limpios reales.</p></div>
+            <div><span>{formatDateTime(snapshot.timestamp)}</span><p>{snapshot.snapshot_id ? "Snapshot y modelos ejecutados." : "Ejecute un snapshot para diagnóstico."}</p></div>
+            <div><span>Operación</span><p>Alimentaciones: {text(operationalControls.feed_events, "0")} · Sifonados: {text(operationalControls.siphon_events, "0")}</p></div>
+          </div>
+          <div className="studio-card ras-panel">
+            <h2>RIESGOS Y RECOMENDACIONES</h2>
+            <div className="ras-decision-list">
+              {risks.slice(0, 3).map((risk) => <div key={text(risk.risk_code)}><AlertTriangle size={15} /><span><strong>{text(risk.risk_code)}</strong><small>{text(risk.explanation)}</small></span><Badge kind={text(risk.risk_level) === "high" ? "danger" : "warning"}>{text(risk.risk_level)}</Badge></div>)}
+              {recommendations.slice(0, 3).map((recommendation) => <div key={text(recommendation.recommendation_code)}><CheckCircle2 size={15} /><span><strong>{text(recommendation.recommended_action)}</strong><small>{text(recommendation.explanation)}</small></span></div>)}
+              {!risks.length && !recommendations.length ? <p className="soft">Sin diagnóstico todavía. Ejecute el snapshot inteligente.</p> : null}
+            </div>
           </div>
         </div>
       </section>
@@ -747,6 +799,29 @@ function formatDateTime(value: unknown) {
   const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return text(value, "sin registro")
   return date.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+}
+
+function RasRange({ label, value, min, max, step = 1, unit, onChange }: { label: string; value: number; min: number; max: number; step?: number; unit: string; onChange: (value: number) => void }) {
+  return (
+    <label className="ras-range">
+      <span><b>{label}</b><strong>{formatNumber(value, step < 1 ? 1 : 0)}{unit}</strong></span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <small>{min}{unit} · {max}{unit}</small>
+    </label>
+  )
+}
+
+function RasTelemetry({ label, value, unit, max, warning, critical, reverse = false, available }: { label: string; value: number; unit: string; max: number; warning: number; critical: number; reverse?: boolean; available: boolean }) {
+  const ratio = available ? Math.min(100, Math.max(0, (value / max) * 100)) : 0
+  const criticalState = available && (reverse ? value >= critical : value <= critical)
+  const warningState = available && !criticalState && (reverse ? value >= warning : value <= warning)
+  return (
+    <div className="ras-telemetry">
+      <span><b>{label}</b><strong>{available ? `${formatNumber(value, max < 1 ? 3 : 2)} ${unit}` : "Sin sensor"}</strong></span>
+      <div><i className={criticalState ? "critical" : warningState ? "warning" : available ? "healthy" : "missing"} style={{ width: `${ratio}%` }} /></div>
+      <small>{available ? criticalState ? "Nivel crítico" : warningState ? "Requiere atención" : "Dentro del rango operativo" : "No disponible en la base de datos"}</small>
+    </div>
+  )
 }
 
 export function LegacyModelDashboardReference({ dashboard, dashboardError, selectedPondId, onNavigate }: { dashboard: Row; dashboardError: unknown; selectedPondId: string; onNavigate: (screen: MlopsScreen) => void }) {
