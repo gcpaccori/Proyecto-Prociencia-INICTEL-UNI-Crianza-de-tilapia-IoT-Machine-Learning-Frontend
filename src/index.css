@@ -2930,6 +2930,94 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.aquatwin-studio .portfolio-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.aquatwin-studio .model-portfolio-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.aquatwin-studio .model-portfolio-card {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+  padding: 14px;
+  color: #1b2941;
+  text-align: left;
+  border: 1px solid #dce7f5;
+  border-top: 3px solid #94a3b8;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.aquatwin-studio .model-portfolio-card:hover,
+.aquatwin-studio .model-portfolio-card.selected {
+  border-color: #62a4ff;
+  border-top-color: #1976ff;
+  background: #f7fbff;
+  box-shadow: 0 8px 20px rgba(25, 118, 255, .09);
+}
+
+.aquatwin-studio .portfolio-card-head,
+.aquatwin-studio .portfolio-version-line,
+.aquatwin-studio .portfolio-data-state {
+  display: flex;
+  align-items: center;
+}
+
+.aquatwin-studio .portfolio-card-head { justify-content: space-between; gap: 8px; }
+.aquatwin-studio .portfolio-card-head div { min-width: 0; }
+.aquatwin-studio .portfolio-card-head strong,
+.aquatwin-studio .portfolio-card-head span { display: block; }
+.aquatwin-studio .portfolio-card-head strong { overflow-wrap: anywhere; font-size: 12px; }
+.aquatwin-studio .portfolio-card-head span { margin-top: 3px; color: #718098; font-size: 9px; }
+.aquatwin-studio .portfolio-version-line { justify-content: space-between; gap: 6px; color: #66758c; font-size: 9px; }
+.aquatwin-studio .portfolio-version-line span { padding-right: 7px; border-right: 1px solid #e5edf7; }
+.aquatwin-studio .portfolio-version-line span:last-child { padding-right: 0; border-right: 0; }
+.aquatwin-studio .portfolio-version-line b { color: #13213a; }
+.aquatwin-studio .portfolio-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.aquatwin-studio .portfolio-metrics span { padding: 7px; border: 1px solid #e5edf7; border-radius: 5px; background: #f8fafc; }
+.aquatwin-studio .portfolio-metrics small,
+.aquatwin-studio .portfolio-metrics b { display: block; }
+.aquatwin-studio .portfolio-metrics small { color: #718098; font-size: 8px; }
+.aquatwin-studio .portfolio-metrics b { margin-top: 3px; color: #13213a; font-size: 11px; }
+.aquatwin-studio .portfolio-metrics .metric-danger { color: #dc2626; }
+.aquatwin-studio .portfolio-data-state { gap: 6px; color: #526179; font-size: 9px; }
+.aquatwin-studio .portfolio-data-state svg { flex: 0 0 auto; color: #16a34a; }
+.aquatwin-studio .portfolio-route { overflow-wrap: anywhere; padding-top: 8px; color: #526179; font-family: monospace; font-size: 8px; border-top: 1px solid #e5edf7; }
+.aquatwin-studio .portfolio-empty { padding: 18px; color: #718098; border: 1px dashed #cbd8e8; text-align: center; }
+
+.aquatwin-studio .training-readiness,
+.aquatwin-studio .artifact-explainer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0;
+  padding: 11px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  background: #f0fdf4;
+}
+.aquatwin-studio .training-readiness.blocked { border-color: #fde68a; background: #fffbeb; }
+.aquatwin-studio .training-readiness strong,
+.aquatwin-studio .training-readiness span,
+.aquatwin-studio .artifact-explainer strong,
+.aquatwin-studio .artifact-explainer span { display: block; }
+.aquatwin-studio .training-readiness strong,
+.aquatwin-studio .artifact-explainer strong { color: #18334d; font-size: 11px; }
+.aquatwin-studio .training-readiness span,
+.aquatwin-studio .artifact-explainer span { margin-top: 3px; color: #66758c; font-size: 9px; line-height: 1.5; }
+.aquatwin-studio .artifact-explainer { margin-bottom: 14px; border-color: #bfdbfe; background: #eff6ff; }
+.aquatwin-studio .artifact-explainer code { color: #075985; font-weight: 800; }
+.aquatwin-studio .portfolio-catalog-section { margin-bottom: 14px; padding-top: 14px; border-top: 1px solid #dce7f5; }
+
 .aquatwin-studio .method-card,
 .aquatwin-studio .training-stage {
   min-width: 0;
@@ -3117,6 +3205,8 @@
 
   .aquatwin-studio .workflow-bar,
   .aquatwin-studio .command-kpi-grid,
+  .aquatwin-studio .portfolio-summary-grid,
+  .aquatwin-studio .model-portfolio-grid,
   .aquatwin-studio .method-grid,
   .aquatwin-studio .explain-row,
   .aquatwin-studio .inspector-content,
@@ -3179,6 +3269,8 @@
   .aquatwin-studio .filter-bar,
   .aquatwin-studio .workflow-bar,
   .aquatwin-studio .command-kpi-grid,
+  .aquatwin-studio .portfolio-summary-grid,
+  .aquatwin-studio .model-portfolio-grid,
   .aquatwin-studio .model-command-center,
   .aquatwin-studio .pipeline-track,
   .aquatwin-studio .audit-track,

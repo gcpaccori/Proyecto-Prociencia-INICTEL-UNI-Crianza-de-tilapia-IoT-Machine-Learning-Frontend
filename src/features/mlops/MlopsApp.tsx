@@ -280,7 +280,7 @@ export function MlopsApp({ selectedFarmId, selectedPondId, onFarmChange, onPondC
           {screen === "cleaning" ? <CleaningView selectedPondId={activePondId} /> : null}
           {screen === "features" ? <FeaturesView selectedPondId={activePondId} /> : null}
           {screen === "training" ? <TrainingView selectedPondId={activePondId} /> : null}
-          {screen === "artifacts" ? <ArtifactsView /> : null}
+          {screen === "artifacts" ? <ArtifactsView selectedPondId={activePondId} /> : null}
           {screen === "models" ? <ModelLifecycleView selectedPondId={activePondId} /> : null}
           {screen === "digitalTwin" ? <DigitalTwinStudioView selectedPondId={activePondId} /> : null}
           {screen === "traceability" ? <TraceabilityView dashboard={dashboard} /> : null}
@@ -1419,9 +1419,11 @@ function FeaturesView({ selectedPondId }: { selectedPondId: string }) {
 function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   const queryClient = useQueryClient()
   const trainableQuery = useQuery({ queryKey: ["trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models") })
+  const portfolioQuery = useQuery({ queryKey: ["model-portfolio", selectedPondId], queryFn: () => apiGet<unknown>(query("/ml/models/portfolio", { pond_id: selectedPondId })), refetchInterval: 15_000 })
   const featuresQuery = useQuery({ queryKey: ["features"], queryFn: () => apiGet<unknown>("/features") })
   const jobsQuery = useQuery({ queryKey: ["training-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs"), refetchInterval: 15_000 })
   const trainable = rows(trainableQuery.data)
+  const portfolio = rows(portfolioQuery.data)
   const features = rows(featuresQuery.data)
   const jobs = rows(jobsQuery.data)
   const [modelCode, setModelCode] = useState(defaultModel)
@@ -1442,6 +1444,7 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
       setSelectedJobId(text(row(data).job_id, selectedJobId))
       queryClient.invalidateQueries({ queryKey: ["training-jobs"] })
       queryClient.invalidateQueries({ queryKey: ["model-assets"] })
+      queryClient.invalidateQueries({ queryKey: ["model-portfolio"] })
     },
   })
   const activeJobId = selectedJobId || text(jobs[0]?.job_id, "")
@@ -1449,6 +1452,7 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   const availableModelCodes = trainable.map((item) => text(item.model_code, "")).filter(Boolean)
   const activeJob = jobs.find((job) => text(job.job_id, "") === activeJobId) ?? {}
   const activeFeatureSet = features.find((feature) => text(feature.feature_set_id, "") === (featureSetId || text(activeJob.feature_set_id, ""))) ?? {}
+  const selectedPortfolio = portfolio.find((item) => text(item.model_code, "") === modelCode) ?? {}
   const trainingSteps = buildTrainingProgressRows(activeJob, createMutation.isPending)
   const autofillTraining = () => {
     const preferredModel = availableModelCodes.includes(preferredVisualModel) ? preferredVisualModel : availableModelCodes[0] || defaultModel
@@ -1466,10 +1470,17 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   return (
     <>
       <section className="page-head">
-        <h1>ENTRENAMIENTO EN VIVO</h1>
-        <p>Lanza training jobs desde feature sets versionados y observa eventos del pipeline.</p>
+        <h1>CENTRO DE ENTRENAMIENTO</h1>
+        <p>Identifica qué modelos pueden entrenarse con el estanque actual, qué falta y qué versiones ya existen.</p>
       </section>
-      <ErrorNote error={trainableQuery.error ?? featuresQuery.error ?? jobsQuery.error ?? eventsQuery.error ?? createMutation.error} />
+      <ErrorNote error={trainableQuery.error ?? portfolioQuery.error ?? featuresQuery.error ?? jobsQuery.error ?? eventsQuery.error ?? createMutation.error} />
+      <section className="portfolio-summary-grid">
+        <CommandKpi icon={<CheckCircle2 />} title="Entrenables ahora" value={String(portfolio.filter((item) => item.can_train).length)} note={`de ${portfolio.length} modelos`} kind="success" />
+        <CommandKpi icon={<AlertTriangle />} title="Bloqueados por datos" value={String(portfolio.filter((item) => !item.can_train).length)} note="variables o registros faltantes" kind="warning" />
+        <CommandKpi icon={<Brain />} title="Ya entrenados" value={String(portfolio.filter((item) => numberValue(item.version_count) > 0).length)} note={`${portfolio.reduce((sum, item) => sum + numberValue(item.version_count), 0)} versiones totales`} kind="info" />
+        <CommandKpi icon={<Rocket />} title="Activos en API" value={String(portfolio.filter((item) => item.active_asset_id).length)} note="sirviendo inferencias" kind="success" />
+      </section>
+      <ModelPortfolioGrid portfolio={portfolio} selectedModelCode={modelCode} onSelect={setModelCode} />
       <section className="mlops-grid two">
         <div className="studio-card mlops-card">
           <div className="card-head">
@@ -1480,6 +1491,13 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
             <button type="button" className="mini-btn mini-btn-primary" onClick={autofillTraining}>Autorrellenar</button>
           </div>
           <NativeSelect label="Modelo entrenable" value={modelCode} options={availableModelCodes.length ? availableModelCodes : [defaultModel, "BPNN_MEA_FEED_INTAKE", "PEARSON_LSTM_ATTENTION_WQ"]} onChange={setModelCode} />
+          <div className={selectedPortfolio.can_train ? "training-readiness ready" : "training-readiness blocked"}>
+            {selectedPortfolio.can_train ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+            <div>
+              <strong>{selectedPortfolio.can_train ? "Puede entrenarse con los datos actuales" : "Aún no puede entrenarse"}</strong>
+              <span>{selectedPortfolio.can_train ? `${text(selectedPortfolio.available_variables, "variables disponibles")}` : `Faltan: ${formatRequiredVariables(selectedPortfolio.missing_variables)}`}</span>
+            </div>
+          </div>
           <NativeSelect label="Feature set" value={featureSetId} options={features.map((feature) => text(feature.feature_set_id, ""))} onChange={setFeatureSetId} />
           <div className="training-context">
             <MetricTile label="Target" value={activeFeatureSet.target_variable ?? "-"} note="feature set" />
@@ -1492,7 +1510,7 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
             <input value={learningRate} onChange={(event) => setLearningRate(event.target.value)} />
           </label>
           <Toggle label="Auto activar artefacto si el backend lo permite" checked={autoActivate} onChange={setAutoActivate} />
-          <button type="button" className="success-action" disabled={!modelCode || createMutation.isPending} onClick={() => createMutation.mutate()}>
+          <button type="button" className="success-action" disabled={!modelCode || !featureSetId || selectedPortfolio.can_train === false || createMutation.isPending} onClick={() => createMutation.mutate()}>
             <Brain size={16} /> {createMutation.isPending ? "Entrenando candidato" : "Entrenar candidato"}
           </button>
         </div>
@@ -1516,39 +1534,62 @@ function TrainingView({ selectedPondId }: { selectedPondId: string }) {
   )
 }
 
-function ArtifactsView() {
+function ArtifactsView({ selectedPondId }: { selectedPondId: string }) {
   const queryClient = useQueryClient()
   const [modelFilter, setModelFilter] = useState("")
   const assetsQuery = useQuery({
     queryKey: ["model-assets", modelFilter],
     queryFn: () => apiGet<unknown>(query("/ml/model-assets", { model_code: modelFilter || undefined, include_payload: false })),
   })
+  const portfolioQuery = useQuery({ queryKey: ["artifact-portfolio", selectedPondId], queryFn: () => apiGet<unknown>(query("/ml/models/portfolio", { pond_id: selectedPondId })), refetchInterval: 15_000 })
   const assets = rows(assetsQuery.data)
+  const portfolio = rows(portfolioQuery.data)
   const activateMutation = useMutation({
     mutationFn: (assetId: string) => apiPost<unknown>(`/ml/model-assets/${assetId}/activate`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-assets"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["model-assets"] })
+      queryClient.invalidateQueries({ queryKey: ["artifact-portfolio"] })
+    },
   })
   const deprecateMutation = useMutation({
     mutationFn: (assetId: string) => apiPost<unknown>(`/ml/model-assets/${assetId}/deprecate`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["model-assets"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["model-assets"] })
+      queryClient.invalidateQueries({ queryKey: ["artifact-portfolio"] })
+    },
   })
-  const modelCodes = Array.from(new Set(assets.map((asset) => text(asset.model_code, "")).filter(Boolean)))
+  const modelCodes = portfolio.map((model) => text(model.model_code, "")).filter(Boolean)
+  const assetRows = assets.map((asset) => {
+    const metrics = row(asset.metrics_json)
+    return {
+      ...asset,
+      mae: latestMetric(metrics, "mae"),
+      rmse: latestMetric(metrics, "rmse"),
+      r2: latestMetric(metrics, "r2"),
+      activation_target: text(asset.status) === "active" ? `/models/${text(asset.model_code)}/predict` : "no sirve inferencias",
+    }
+  })
 
   return (
     <>
       <section className="page-head">
-        <h1>ARTEFACTOS DE MODELO</h1>
-        <p>Administra versiones entrenadas, activacion productiva y deprecacion controlada.</p>
+        <h1>VERSIONES Y PUBLICACIÓN</h1>
+        <p>Cada artefacto es una versión entrenada. Activar una versión la conecta a la ruta productiva de inferencia del modelo.</p>
       </section>
-      <ErrorNote error={assetsQuery.error ?? activateMutation.error ?? deprecateMutation.error} />
+      <ErrorNote error={assetsQuery.error ?? portfolioQuery.error ?? activateMutation.error ?? deprecateMutation.error} />
+      <section className="artifact-explainer">
+        <Rocket size={20} />
+        <div><strong>¿Qué ocurre al activar?</strong><span>La versión elegida pasa a responder en <code>/models/&#123;model_code&#125;/predict</code>. La versión activa anterior deja de ser productiva, pero conserva trazabilidad y métricas.</span></div>
+      </section>
+      <ModelPortfolioGrid portfolio={portfolio.filter((item) => numberValue(item.version_count) > 0)} selectedModelCode={modelFilter} onSelect={setModelFilter} />
       <section className="filter-bar mlops-toolbar">
         <NativeSelect label="Modelo" value={modelFilter} options={["", ...modelCodes]} onChange={setModelFilter} />
         <JsonButton label="Assets JSON" value={assetsQuery.data} />
       </section>
       <div className="studio-card mlops-card">
         <DataTable
-          rows={assets}
-          columns={["asset_id", "model_code", "version", "artifact_format", "feature_set_id", "training_job_id", "status", "created_at", "activated_at"]}
+          rows={assetRows}
+          columns={["model_code", "version", "status", "mae", "rmse", "r2", "activation_target", "feature_set_id", "training_job_id", "created_at", "activated_at"]}
           actions={(asset) => (
             <>
               <button type="button" className="mini-btn mini-btn-success" disabled={activateMutation.isPending || text(asset.status) === "active"} onClick={() => activateMutation.mutate(text(asset.asset_id, ""))}>
@@ -1569,11 +1610,13 @@ function ArtifactsView() {
 function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   const lifecycleQuery = useQuery({ queryKey: ["ml-lifecycle"], queryFn: () => apiGet<unknown>("/ml/lifecycle/status"), refetchInterval: 30_000 })
   const trainableQuery = useQuery({ queryKey: ["trainable-models"], queryFn: () => apiGet<unknown>("/ml/trainable-models"), refetchInterval: 30_000 })
+  const portfolioQuery = useQuery({ queryKey: ["models-portfolio", selectedPondId], queryFn: () => apiGet<unknown>(query("/ml/models/portfolio", { pond_id: selectedPondId })), refetchInterval: 30_000 })
   const assetsQuery = useQuery({ queryKey: ["active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })), refetchInterval: 30_000 })
   const jobsQuery = useQuery({ queryKey: ["training-jobs"], queryFn: () => apiGet<unknown>("/ml/training-jobs"), refetchInterval: 30_000 })
   const featuresQuery = useQuery({ queryKey: ["features"], queryFn: () => apiGet<unknown>("/features"), refetchInterval: 30_000 })
   const lifecycle = unwrapObject(lifecycleQuery.data)
   const trainable = rows(trainableQuery.data)
+  const portfolio = rows(portfolioQuery.data)
   const activeAssets = rows(assetsQuery.data)
   const jobs = rows(jobsQuery.data)
   const featureSets = rows(featuresQuery.data)
@@ -1636,7 +1679,7 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
       return results
     },
   })
-  const modelsToShow = mergeModelRows(trainable, activeAssets)
+  const modelsToShow = portfolio.length ? portfolio : mergeModelRows(trainable, activeAssets)
   const activeCount = activeAssets.length
   const previewChartRows = useMemo(() => buildPreviewChartRows(previewRows, featureNames), [previewRows, featureNames])
   const demoRows = Array.isArray(demoMutation.data) ? demoMutation.data : []
@@ -1655,10 +1698,10 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
   const detailedSteps = backendSteps.length ? backendSteps : buildDetailedModelSteps(readiness, selectedFeatureSet, selectedJob, selectedAsset, selectedMetrics, demoRows.length)
 
   useEffect(() => {
-    if (activeAssets.length && !activeAssets.some((asset) => text(asset.model_code, "") === selectedModelCode)) {
-      setSelectedModelCode(text(activeAssets[0].model_code, defaultModel))
+    if (modelsToShow.length && !modelsToShow.some((model) => text(model.model_code, "") === selectedModelCode)) {
+      setSelectedModelCode(text(modelsToShow[0].model_code, defaultModel))
     }
-  }, [activeAssets, selectedModelCode])
+  }, [modelsToShow, selectedModelCode])
 
   const fillSample = (sample: Row) => {
     const source = Object.keys(sample).length ? sample : row(previewRows[0] ?? previewChartRows[0])
@@ -1699,13 +1742,20 @@ function ModelLifecycleView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <div className="institution-lockup">INICTEL-UNI · PROCIENCIA</div>
       </section>
-      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? readinessQuery.error ?? lifecycleDetailQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
+      <ErrorNote error={lifecycleQuery.error ?? trainableQuery.error ?? portfolioQuery.error ?? assetsQuery.error ?? jobsQuery.error ?? featuresQuery.error ?? readinessQuery.error ?? lifecycleDetailQuery.error ?? previewQuery.error ?? predictMutation.error ?? demoMutation.error} />
       <section className="kpi-grid lifecycle-kpis">
         <Kpi icon={<Database />} label="Limpiezas" value={text(lifecycle.cleaning_enabled ? rowsCountHint(lifecycle, "cleaning") : "0")} note="datos trazables" />
         <Kpi icon={<Table2 />} label="Feature sets" value={text(lifecycle.total_feature_sets, "0")} note={`${featureSets.length} listados`} color="green" />
         <Kpi icon={<Brain />} label="Entrenamientos" value={text(lifecycle.total_training_jobs, "0")} note="jobs registrados" color="purple" />
         <Kpi icon={<Boxes />} label="Activos" value={String(activeCount)} note="modelos productivos" color="amber" />
         <Kpi icon={<Rocket />} label="Inferencia" value={text(lifecycle.model_assets_enabled ? "ON" : "OFF")} note="con trazabilidad" />
+      </section>
+      <section className="portfolio-catalog-section">
+        <div className="card-head">
+          <div><h2>CATÁLOGO COMPARATIVO</h2><p className="soft">Versiones, estado productivo, disponibilidad de datos y métricas reales de validación.</p></div>
+          <Badge kind="info">{portfolio.length} modelos entrenables</Badge>
+        </div>
+        <ModelPortfolioGrid portfolio={portfolio} selectedModelCode={selectedModelCode} onSelect={setSelectedModelCode} />
       </section>
       <section className="studio-card model-showcase">
         <div>
@@ -1900,6 +1950,54 @@ function mergeModelRows(trainable: Row[], activeAssets: Row[]) {
     byCode.set(code, { ...byCode.get(code), ...asset, lifecycle_status: "active" })
   })
   return Array.from(byCode.values()).filter((item) => text(item.model_code, ""))
+}
+
+function ModelPortfolioGrid({
+  portfolio,
+  selectedModelCode,
+  onSelect,
+}: {
+  portfolio: Row[]
+  selectedModelCode: string
+  onSelect: (modelCode: string) => void
+}) {
+  if (!portfolio.length) return <div className="portfolio-empty">No hay modelos registrados para mostrar.</div>
+  return (
+    <div className="model-portfolio-grid">
+      {portfolio.map((model) => {
+        const modelCode = text(model.model_code, "")
+        const metrics = row(model.active_metrics ?? model.best_metrics)
+        const r2 = latestMetric(metrics, "r2")
+        const mae = latestMetric(metrics, "mae")
+        const rmse = latestMetric(metrics, "rmse")
+        const versionCount = numberValue(model.version_count)
+        const active = Boolean(model.active_asset_id)
+        return (
+          <button type="button" className={selectedModelCode === modelCode ? "model-portfolio-card selected" : "model-portfolio-card"} key={modelCode} onClick={() => onSelect(modelCode)}>
+            <div className="portfolio-card-head">
+              <div><strong>{modelTitle(modelCode)}</strong><span>{text(model.family, "modelo ML")}</span></div>
+              <Badge kind={active ? "success" : model.can_train ? "info" : "warning"}>{active ? "producción" : model.can_train ? "entrenable" : "faltan datos"}</Badge>
+            </div>
+            <div className="portfolio-version-line">
+              <span>Versiones <b>{versionCount}</b></span>
+              <span>Activa <b>{text(model.active_version, "ninguna")}</b></span>
+              <span>Jobs <b>{text(model.completed_training_runs, "0")}/{text(model.training_runs, "0")}</b></span>
+            </div>
+            <div className="portfolio-metrics">
+              <span><small>MAE</small><b>{formatNumber(mae, 4)}</b></span>
+              <span><small>RMSE</small><b>{formatNumber(rmse, 4)}</b></span>
+              <span><small>R²</small><b className={r2 !== undefined && r2 < 0 ? "metric-danger" : ""}>{formatNumber(r2, 3)}</b></span>
+            </div>
+            <div className="portfolio-data-state">
+              {model.can_train ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+              <span>{model.can_train ? "Datos suficientes para reentrenar" : `Faltan: ${formatRequiredVariables(model.missing_variables)}`}</span>
+            </div>
+            <div className="portfolio-route">{active ? text(model.active_route, "ruta productiva") : versionCount ? "Versiones candidatas, ninguna activa" : "Aún no existen versiones"}</div>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function buildPreviewChartRows(previewRows: Row[], featureNames: string[]) {
