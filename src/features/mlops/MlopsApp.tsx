@@ -634,7 +634,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
     { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
   ]
-  const fishVisualCount = Math.min(30, Math.max(8, Math.round(numberValue(operationalControls.fish_count) / 3)))
+  const fishVisualCount = Math.min(50, Math.max(10, Math.round(numberValue(operationalControls.fish_count))))
   const aerationLevel = numberValue(operationalControls.aeration_percent)
   const filtrationLevel = numberValue(operationalControls.filtration_percent)
   const fishScaleBase = Math.min(1.35, Math.max(0.55, numberValue(initialProductiveState.average_weight_g, numberValue(operationalControls.average_weight_g)) / 220))
