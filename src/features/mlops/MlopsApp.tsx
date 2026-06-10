@@ -538,11 +538,17 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     feed_events: 0,
     siphon_events: 0,
   })
+  const [committedOperationalControls, setCommittedOperationalControls] = useState(operationalControls)
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setCommittedOperationalControls(operationalControls), 350)
+    return () => window.clearTimeout(timeout)
+  }, [operationalControls])
   const catalogQuery = useQuery({ queryKey: ["twin-model-catalog"], queryFn: () => apiGet<unknown>("/models") })
   const assetsQuery = useQuery({ queryKey: ["twin-active-assets"], queryFn: () => apiGet<unknown>(query("/ml/model-assets", { status: "active", include_payload: false })) })
   const latestSnapshotQuery = useQuery({ queryKey: ["twin-latest-snapshot", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/latest`), enabled: Boolean(selectedPondId), retry: false, refetchInterval: 30_000 })
   const risksQuery = useQuery({ queryKey: ["twin-risks", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/risks`), enabled: Boolean(selectedPondId), refetchInterval: 30_000 })
   const recommendationsQuery = useQuery({ queryKey: ["twin-recommendations", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/recommendations`), enabled: Boolean(selectedPondId), refetchInterval: 30_000 })
+  const operationalEventsQuery = useQuery({ queryKey: ["twin-operational-events", selectedPondId], queryFn: () => apiGet<unknown>(`/digital-twin/${selectedPondId}/events?limit=30`), enabled: Boolean(selectedPondId), refetchInterval: 30_000 })
   const catalog = rows(catalogQuery.data)
   const assets = rows(assetsQuery.data)
   const availableModels = useMemo(() => {
@@ -557,16 +563,25 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     setModelsInitialized(true)
   }, [availableModels, modelsInitialized])
   const projectionQuery = useQuery({
-    queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments, operationalControls],
+    queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments, committedOperationalControls],
     queryFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/projection`, {
       horizon_hours: horizonHours,
       step_hours: horizonHours <= 24 ? 1 : horizonHours <= 168 ? 6 : 24,
       selected_models: selectedModels,
       variable_adjustments_per_hour: adjustments,
-      operational_controls: operationalControls,
+      operational_controls: committedOperationalControls,
     }),
     enabled: Boolean(selectedPondId),
     refetchInterval: 30_000,
+    placeholderData: (previousData) => previousData,
+  })
+  const operationalEventMutation = useMutation({
+    mutationFn: (event: Row) => apiPost<unknown>(`/digital-twin/${selectedPondId}/events`, event),
+    onSuccess: (_data, event) => {
+      const key = event.event_type === "feeding" ? "feed_events" : "siphon_events"
+      setOperationalControls((current) => ({ ...current, [key]: numberValue(current[key]) + 1 }))
+      queryClient.invalidateQueries({ queryKey: ["twin-operational-events", selectedPondId] })
+    },
   })
   const snapshotMutation = useMutation({
     mutationFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/snapshot`, { operational_constraints: operationalControls }),
@@ -603,6 +618,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const snapshot = row(snapshotMutation.data ?? latestSnapshotQuery.data)
   const risks = rows(snapshot.risk_assessments).length ? rows(snapshot.risk_assessments) : rows(risksQuery.data)
   const recommendations = rows(snapshot.recommendations).length ? rows(snapshot.recommendations) : rows(recommendationsQuery.data)
+  const operationalEvents = rows(operationalEventsQuery.data)
   const oxygen = numberValue(baseline.dissolved_oxygen_mg_l)
   const temperature = numberValue(baseline.water_temperature_c)
   const ph = numberValue(baseline.ph)
@@ -618,13 +634,24 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
     { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
   ]
-  const fishVisualCount = Math.min(20, Math.max(5, Math.round(numberValue(operationalControls.fish_count) / 5)))
+  const fishVisualCount = Math.min(30, Math.max(8, Math.round(numberValue(operationalControls.fish_count) / 3)))
   const aerationLevel = numberValue(operationalControls.aeration_percent)
   const filtrationLevel = numberValue(operationalControls.filtration_percent)
   const fishScaleBase = Math.min(1.35, Math.max(0.55, numberValue(initialProductiveState.average_weight_g, numberValue(operationalControls.average_weight_g)) / 220))
   const waterClarity = organicLoadIndex >= 65 ? "hazy" : organicLoadIndex >= 30 ? "moderate" : "clear"
   const setOperationalControl = (key: string, value: number | boolean | string) => setOperationalControls((current) => ({ ...current, [key]: value }))
-  const registerOperation = (key: "feed_events" | "siphon_events") => setOperationalControls((current) => ({ ...current, [key]: numberValue(current[key]) + 1 }))
+  const registerOperation = (eventType: "feeding" | "siphoning") => operationalEventMutation.mutate({
+    event_type: eventType,
+    amount_kg: eventType === "feeding" ? numberValue(chartRows[0]?.daily_feed_kg) : undefined,
+    operator: "Administrador",
+    notes: eventType === "feeding" ? "Alimentación registrada desde el gemelo digital." : "Sifonado registrado desde el gemelo digital.",
+    details: {
+      feeding_percent: operationalControls.feeding_percent,
+      filtration_percent: operationalControls.filtration_percent,
+      fish_count: operationalControls.fish_count,
+      average_weight_g: operationalControls.average_weight_g,
+    },
+  })
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
   return (
     <>
@@ -635,7 +662,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <Badge kind={projectionQuery.isFetching ? "info" : "success"}>{projectionQuery.isFetching ? "actualizando" : "sincronizado"}</Badge>
       </section>
-      <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error ?? risksQuery.error ?? recommendationsQuery.error ?? snapshotMutation.error} />
+      <ErrorNote error={catalogQuery.error ?? assetsQuery.error ?? projectionQuery.error ?? risksQuery.error ?? recommendationsQuery.error ?? operationalEventsQuery.error ?? operationalEventMutation.error ?? snapshotMutation.error} />
       <section className="ras-console-grid">
         <div className="ras-console-column">
           <div className="studio-card ras-panel">
@@ -651,8 +678,8 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             <RasRange label="Aireación / inyección O₂" value={numberValue(operationalControls.aeration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("aeration_percent", value)} />
             <RasRange label="Filtrado mecánico / biológico" value={numberValue(operationalControls.filtration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("filtration_percent", value)} />
             <div className="ras-operation-actions">
-              <button type="button" className="primary-action" onClick={() => registerOperation("feed_events")}><Fish size={15} /> Registrar alimentación</button>
-              <button type="button" className="outline-action" onClick={() => registerOperation("siphon_events")}><RefreshCcw size={15} /> Registrar sifonado</button>
+              <button type="button" className="primary-action" disabled={operationalEventMutation.isPending} onClick={() => registerOperation("feeding")}><Fish size={15} /> {operationalEventMutation.isPending ? "Guardando..." : "Registrar alimentación"}</button>
+              <button type="button" className="outline-action" disabled={operationalEventMutation.isPending} onClick={() => registerOperation("siphoning")}><RefreshCcw size={15} /> {operationalEventMutation.isPending ? "Guardando..." : "Registrar sifonado"}</button>
             </div>
             <small className="ras-context-note">Las mediciones siguen siendo reales. Población, equipos y alimento son entradas explícitas de simulación productiva.</small>
           </div>
@@ -704,9 +731,10 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             </div>
             <div className="ras-sensor ras-sensor-oxygen"><span>OD</span><i /></div>
             <div className="ras-sensor ras-sensor-temperature"><span>T°</span><i /></div>
-            {numberValue(operationalControls.feed_events) > 0 ? <div className="ras-feed-cloud">{Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ "--i": index } as CSSProperties} />)}</div> : null}
+            {numberValue(operationalControls.feed_events) > 0 ? <div className="ras-feed-cloud">{Array.from({ length: 24 }).map((_, index) => <i key={index} style={{ "--feed-top": `${(index * 11) % 56}px`, "--feed-left": `${10 + ((index * 23) % 78)}%`, "--feed-delay": `${-((index * 0.31) % 3)}s` } as CSSProperties} />)}</div> : null}
             <div className="ras-scene-status">
               <span>{behaviorLabel(behavior)}</span>
+              <span>{fishVisualCount} peces representativos de {formatNumber(operationalControls.fish_count, 0)}</span>
               <span>Carga {formatNumber(organicLoadIndex, 0)}%</span>
               <span>{waterClarity === "clear" ? "Agua clara" : waterClarity === "moderate" ? "Claridad media" : "Agua cargada"}</span>
             </div>
@@ -731,8 +759,8 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             <h2>REGISTRO DE PROCESOS</h2>
             <div><span>{formatDateTime(projection.generated_at)}</span><p>Proyección recalculada con datos limpios reales.</p></div>
             <div><span>{formatDateTime(snapshot.timestamp)}</span><p>{snapshot.snapshot_id ? "Snapshot y modelos ejecutados." : "Ejecute un snapshot para diagnóstico."}</p></div>
-            <div><span>Alimentación</span><p>{text(operationalControls.feed_events, "0")} eventos · plan {formatNumber(operationalControls.feeding_percent, 0)}% · ración {formatNumber(chartRows[0]?.daily_feed_kg, 3)} kg/día.</p></div>
-            <div><span>Limpieza</span><p>{text(operationalControls.siphon_events, "0")} sifonados · filtración configurada al {formatNumber(operationalControls.filtration_percent, 0)}%.</p></div>
+            {operationalEvents.slice(0, 8).map((event) => <div key={text(event.event_id)}><span>{formatDateTime(event.event_time)}</span><p>{event.event_type === "feeding" ? `Alimentación guardada · ${formatNumber(event.amount_kg, 3)} kg` : "Sifonado guardado"} · {text(event.operator, "operador")}</p></div>)}
+            {!operationalEvents.length ? <div><span>Sin operaciones guardadas</span><p>Registre alimentación o sifonado para iniciar la bitácora MySQL.</p></div> : null}
             <div><span>Producción</span><p>{formatNumber(initialProductiveState.biomass_kg, 2)} kg actuales → {formatNumber(simulationSummary.final_biomass_kg, 2)} kg en {formatNumber(simulationSummary.horizon_days, 0)} días.</p></div>
           </div>
           <div className="studio-card ras-panel">
