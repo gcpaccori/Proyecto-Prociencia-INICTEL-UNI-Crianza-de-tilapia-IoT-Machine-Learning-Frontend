@@ -605,6 +605,10 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
     { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
   ]
+  const fishVisualCount = Math.min(14, Math.max(6, Math.round(numberValue(operationalControls.fish_count) / 7)))
+  const aerationLevel = numberValue(operationalControls.aeration_percent)
+  const filtrationLevel = numberValue(operationalControls.filtration_percent)
+  const waterClarity = turbidity >= 40 || filtrationLevel < 25 ? "hazy" : turbidity >= 20 || filtrationLevel < 50 ? "moderate" : "clear"
   const setOperationalControl = (key: string, value: number | boolean | string) => setOperationalControls((current) => ({ ...current, [key]: value }))
   const registerOperation = (key: "feed_events" | "siphon_events") => setOperationalControls((current) => ({ ...current, [key]: numberValue(current[key]) + 1 }))
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
@@ -641,13 +645,50 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         </div>
         <div className="studio-card ras-tank-panel">
           <div className="card-head"><div><h2>CÁMARA DE CULTIVO DIGITAL</h2><p className="soft">Estado real, dinámica visual y contexto operativo del escenario.</p></div><Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "estable" : poolState}</Badge></div>
-          <div className={`ras-cylinder-tank ras-cylinder-${poolState}`} style={{ "--fish-load": Math.min(100, numberValue(operationalControls.fish_count)) } as CSSProperties}>
+          <div
+            className={`ras-cylinder-tank ras-cylinder-${poolState} ras-water-${waterClarity}`}
+            style={{ "--fish-load": Math.min(100, numberValue(operationalControls.fish_count)), "--aeration": aerationLevel, "--filtration": filtrationLevel } as CSSProperties}
+          >
+            <div className="ras-water-volume"><span /><span /><span /></div>
             <div className="ras-water-surface"><span /><span /><span /></div>
             <div className="ras-inlet" />
             <div className="ras-drain" />
-            <div className="ras-bubble-field">{Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ "--i": index } as CSSProperties} />)}</div>
-            <div className="ras-fish-field">{Array.from({ length: Math.min(18, Math.max(5, Math.round(numberValue(operationalControls.fish_count) / 4))) }).map((_, index) => <span key={index} style={{ "--i": index } as CSSProperties}><i /><b /></span>)}</div>
+            <div className="ras-floor"><span /><span /><span /><span /><span /></div>
+            <div className="ras-current-ring ras-current-ring-a" />
+            <div className="ras-current-ring ras-current-ring-b" />
+            <div className="ras-diffuser ras-diffuser-a" />
+            <div className="ras-diffuser ras-diffuser-b" />
+            <div className="ras-bubble-field">
+              {Array.from({ length: Math.max(8, Math.round(aerationLevel / 3)) }).map((_, index) => <i key={index} style={{ "--bubble-left": `${18 + ((index * 17) % 64)}%`, "--bubble-size": `${3 + ((index * 3) % 6)}px`, "--bubble-duration": `${3.2 + ((index % 7) * 0.37)}s`, "--bubble-delay": `${index * -0.23}s` } as CSSProperties} />)}
+            </div>
+            <div className="ras-particle-field">
+              {Array.from({ length: Math.max(3, Math.round((100 - filtrationLevel) / 5)) }).map((_, index) => <i key={index} style={{ "--particle-top": `${16 + ((index * 23) % 67)}%`, "--particle-left": `${9 + ((index * 37) % 79)}%`, "--particle-size": `${2 + ((index * 5) % 4)}px`, "--particle-duration": `${8 + ((index % 8) * 1.8)}s`, "--particle-delay": `${index * -0.61}s` } as CSSProperties} />)}
+            </div>
+            <div className="ras-fish-field">
+              {Array.from({ length: fishVisualCount }).map((_, index) => (
+                <span
+                  className={`ras-fish ras-fish-orbit-${index % 6}`}
+                  key={index}
+                  style={{
+                    "--i": index,
+                    "--fish-duration": `${13 + ((index * 7) % 15)}s`,
+                    "--fish-delay": `${-((index * 3.7) % 22)}s`,
+                    "--fish-scale": 0.58 + ((index * 13) % 42) / 100,
+                    "--fish-opacity": 0.62 + ((index * 17) % 34) / 100,
+                    "--fish-hue": `${185 + ((index * 29) % 105)}`,
+                  } as CSSProperties}
+                >
+                  <span className="ras-fish-shape"><b /><i /><em /></span>
+                </span>
+              ))}
+            </div>
+            <div className="ras-sensor ras-sensor-oxygen"><span>OD</span><i /></div>
+            <div className="ras-sensor ras-sensor-temperature"><span>T°</span><i /></div>
             <div className="ras-tank-reading"><Droplet size={24} /><strong>{formatNumber(oxygen, 2)} mg/L</strong><span>OD real de MySQL</span></div>
+            <div className="ras-scene-status">
+              <span>Corriente circular</span>
+              <span>{waterClarity === "clear" ? "Agua clara" : waterClarity === "moderate" ? "Claridad media" : "Agua turbia"}</span>
+            </div>
           </div>
           <div className="ras-engineering-strip">
             <div><span>Carga configurada</span><strong>{formatNumber(operationalControls.fish_count, 0)} peces</strong></div>
