@@ -526,6 +526,11 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   })
   const [operationalControls, setOperationalControls] = useState<Record<string, number | boolean | string>>({
     fish_count: 25,
+    average_weight_g: 120,
+    fish_length_cm: 18.6,
+    tank_volume_m3: 10,
+    feed_conversion_ratio: 1.5,
+    feeding_percent: 100,
     aeration_percent: 60,
     filtration_percent: 50,
     temperature_setpoint_c: 24,
@@ -552,10 +557,10 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
     setModelsInitialized(true)
   }, [availableModels, modelsInitialized])
   const projectionQuery = useQuery({
-    queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments],
+    queryKey: ["digital-twin-projection", selectedPondId, horizonHours, selectedModels, adjustments, operationalControls],
     queryFn: () => apiPost<unknown>(`/digital-twin/${selectedPondId}/projection`, {
       horizon_hours: horizonHours,
-      step_hours: horizonHours <= 24 ? 1 : 3,
+      step_hours: horizonHours <= 24 ? 1 : horizonHours <= 168 ? 6 : 24,
       selected_models: selectedModels,
       variable_adjustments_per_hour: adjustments,
       operational_controls: operationalControls,
@@ -578,12 +583,19 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const baselineUnits = row(projection.baseline_units)
   const baselineQualityFlags = row(projection.baseline_quality_flags)
   const trends = row(projection.observed_trends_per_hour)
-  const chartRows = rows(projection.points).map((point) => {
+  const initialProductiveState = row(projection.initial_productive_state)
+  const simulationSummary = row(projection.simulation_summary)
+  const derivedIndicators = row(projection.derived_indicators)
+  const chartRows: Row[] = rows(projection.points).map((point) => {
     const values = row(point.values)
     const modelActivity = row(point.model_activity)
+    const biologicalState = row(point.biological_state)
+    const operationalState = row(point.operational_state)
     return {
       hour: formatHourLabel(point.timestamp),
       ...values,
+      ...biologicalState,
+      ...operationalState,
       ...Object.fromEntries(Object.entries(modelActivity).map(([code, value]) => [`model_${code}`, value])),
     }
   })
@@ -591,24 +603,26 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
   const snapshot = row(snapshotMutation.data ?? latestSnapshotQuery.data)
   const risks = rows(snapshot.risk_assessments).length ? rows(snapshot.risk_assessments) : rows(risksQuery.data)
   const recommendations = rows(snapshot.recommendations).length ? rows(snapshot.recommendations) : rows(recommendationsQuery.data)
-  const modelOutputs = rows(snapshot.model_outputs)
   const oxygen = numberValue(baseline.dissolved_oxygen_mg_l)
   const temperature = numberValue(baseline.water_temperature_c)
   const ph = numberValue(baseline.ph)
   const nitrate = numberValue(baseline.nitrate_ion)
-  const ammonia = numberValue(baseline.ammonia_mg_l ?? baseline.tan_mg_l)
-  const turbidity = numberValue(baseline.turbidity_ntu)
-  const poolState = oxygen > 0 && oxygen < 4 ? "critical" : oxygen > 0 && oxygen < 5 ? "warning" : "healthy"
+  const waterQualityIndex = numberValue(derivedIndicators.water_quality_index)
+  const stressIndex = numberValue(derivedIndicators.stress_index)
+  const organicLoadIndex = numberValue(derivedIndicators.organic_load_index)
+  const behavior = text(derivedIndicators.behavior, "normal")
+  const poolState = behavior === "critical_mortality_risk" ? "critical" : stressIndex >= 35 ? "warning" : "healthy"
   const liveMeasurementCards = [
     { code: "dissolved_oxygen_mg_l", label: "Oxígeno disuelto", value: oxygen, fallbackUnit: "mg/L" },
     { code: "water_temperature_c", label: "Temperatura", value: temperature, fallbackUnit: "°C" },
     { code: "ph", label: "pH", value: ph, fallbackUnit: "pH" },
     { code: "nitrate_ion", label: "Nitrato", value: nitrate, fallbackUnit: "mg/L" },
   ]
-  const fishVisualCount = Math.min(14, Math.max(6, Math.round(numberValue(operationalControls.fish_count) / 7)))
+  const fishVisualCount = Math.min(20, Math.max(5, Math.round(numberValue(operationalControls.fish_count) / 5)))
   const aerationLevel = numberValue(operationalControls.aeration_percent)
   const filtrationLevel = numberValue(operationalControls.filtration_percent)
-  const waterClarity = turbidity >= 40 || filtrationLevel < 25 ? "hazy" : turbidity >= 20 || filtrationLevel < 50 ? "moderate" : "clear"
+  const fishScaleBase = Math.min(1.35, Math.max(0.55, numberValue(initialProductiveState.average_weight_g, numberValue(operationalControls.average_weight_g)) / 220))
+  const waterClarity = organicLoadIndex >= 65 ? "hazy" : organicLoadIndex >= 30 ? "moderate" : "clear"
   const setOperationalControl = (key: string, value: number | boolean | string) => setOperationalControls((current) => ({ ...current, [key]: value }))
   const registerOperation = (key: "feed_events" | "siphon_events") => setOperationalControls((current) => ({ ...current, [key]: numberValue(current[key]) + 1 }))
   const toggleModel = (modelCode: string) => setSelectedModels((current) => current.includes(modelCode) ? current.filter((code) => code !== modelCode) : [...current, modelCode])
@@ -625,28 +639,34 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
       <section className="ras-console-grid">
         <div className="ras-console-column">
           <div className="studio-card ras-panel">
-            <div className="card-head"><div><h2>MANDOS OPERATIVOS RAS</h2><p className="soft">Contexto trazable para ejecutar modelos y escenarios.</p></div><Gauge size={20} /></div>
-            <RasRange label="Peces en crianza" value={numberValue(operationalControls.fish_count)} min={3} max={200} unit="" onChange={(value) => setOperationalControl("fish_count", value)} />
+            <div className="card-head"><div><h2>POBLACIÓN Y MANDOS RAS</h2><p className="soft">Cada cambio recalcula producción, carga y comportamiento.</p></div><Gauge size={20} /></div>
+            <div className="ras-population-grid">
+              <RasNumberInput label="Peces" value={numberValue(operationalControls.fish_count)} min={1} step={1} unit="" onChange={(value) => setOperationalControl("fish_count", value)} />
+              <RasNumberInput label="Peso promedio" value={numberValue(operationalControls.average_weight_g)} min={1} step={1} unit="g" onChange={(value) => setOperationalControl("average_weight_g", value)} />
+              <RasNumberInput label="Talla inicial" value={numberValue(operationalControls.fish_length_cm)} min={1} step={0.1} unit="cm" onChange={(value) => setOperationalControl("fish_length_cm", value)} />
+              <RasNumberInput label="Volumen útil" value={numberValue(operationalControls.tank_volume_m3)} min={0.1} step={0.1} unit="m³" onChange={(value) => setOperationalControl("tank_volume_m3", value)} />
+              <RasNumberInput label="FCR esperado" value={numberValue(operationalControls.feed_conversion_ratio)} min={0.1} step={0.1} unit="" onChange={(value) => setOperationalControl("feed_conversion_ratio", value)} />
+              <RasNumberInput label="Plan alimentario" value={numberValue(operationalControls.feeding_percent)} min={0} step={5} unit="%" onChange={(value) => setOperationalControl("feeding_percent", value)} />
+            </div>
             <RasRange label="Aireación / inyección O₂" value={numberValue(operationalControls.aeration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("aeration_percent", value)} />
             <RasRange label="Filtrado mecánico / biológico" value={numberValue(operationalControls.filtration_percent)} min={0} max={100} unit="%" onChange={(value) => setOperationalControl("filtration_percent", value)} />
-            <RasRange label="Temperatura objetivo" value={numberValue(operationalControls.temperature_setpoint_c)} min={12} max={34} step={0.5} unit=" °C" onChange={(value) => setOperationalControl("temperature_setpoint_c", value)} />
             <div className="ras-operation-actions">
               <button type="button" className="primary-action" onClick={() => registerOperation("feed_events")}><Fish size={15} /> Registrar alimentación</button>
               <button type="button" className="outline-action" onClick={() => registerOperation("siphon_events")}><RefreshCcw size={15} /> Registrar sifonado</button>
             </div>
-            <small className="ras-context-note">Los mandos quedan registrados como contexto. Solo los ajustes explícitos inferiores alteran numéricamente la curva.</small>
+            <small className="ras-context-note">Las mediciones siguen siendo reales. Población, equipos y alimento son entradas explícitas de simulación productiva.</small>
           </div>
           <div className="studio-card ras-panel">
             <h2>TELEMETRÍA BIOQUÍMICA</h2>
             <RasTelemetry label="Oxígeno disuelto" value={oxygen} unit="mg/L" max={12} warning={5} critical={3} available={baseline.dissolved_oxygen_mg_l !== undefined} />
-            <RasTelemetry label="Amoniaco / TAN" value={ammonia} unit="mg/L" max={0.1} warning={0.02} critical={0.05} reverse available={baseline.ammonia_mg_l !== undefined || baseline.tan_mg_l !== undefined} />
-            <RasTelemetry label="Turbidez" value={turbidity} unit="NTU" max={100} warning={20} critical={40} reverse available={baseline.turbidity_ntu !== undefined} />
+            <RasTelemetry label="Calidad derivada" value={waterQualityIndex} unit="%" max={100} warning={65} critical={35} available={projection.derived_indicators !== undefined} />
+            <RasTelemetry label="Carga orgánica simulada" value={organicLoadIndex} unit="%" max={100} warning={35} critical={65} reverse available={projection.derived_indicators !== undefined} />
           </div>
         </div>
         <div className="studio-card ras-tank-panel">
           <div className="card-head"><div><h2>CÁMARA DE CULTIVO DIGITAL</h2><p className="soft">Estado real, dinámica visual y contexto operativo del escenario.</p></div><Badge kind={poolState === "healthy" ? "success" : poolState === "warning" ? "warning" : "danger"}>{poolState === "healthy" ? "estable" : poolState}</Badge></div>
           <div
-            className={`ras-cylinder-tank ras-cylinder-${poolState} ras-water-${waterClarity}`}
+            className={`ras-cylinder-tank ras-cylinder-${poolState} ras-water-${waterClarity} ras-behavior-${behavior}`}
             style={{ "--fish-load": Math.min(100, numberValue(operationalControls.fish_count)), "--aeration": aerationLevel, "--filtration": filtrationLevel } as CSSProperties}
           >
             <div className="ras-water-volume"><span /><span /><span /></div>
@@ -673,7 +693,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
                     "--i": index,
                     "--fish-duration": `${13 + ((index * 7) % 15)}s`,
                     "--fish-delay": `${-((index * 3.7) % 22)}s`,
-                    "--fish-scale": 0.58 + ((index * 13) % 42) / 100,
+                    "--fish-scale": fishScaleBase * (0.58 + ((index * 13) % 42) / 100),
                     "--fish-opacity": 0.62 + ((index * 17) % 34) / 100,
                     "--fish-hue": `${185 + ((index * 29) % 105)}`,
                   } as CSSProperties}
@@ -684,17 +704,18 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             </div>
             <div className="ras-sensor ras-sensor-oxygen"><span>OD</span><i /></div>
             <div className="ras-sensor ras-sensor-temperature"><span>T°</span><i /></div>
-            <div className="ras-tank-reading"><Droplet size={24} /><strong>{formatNumber(oxygen, 2)} mg/L</strong><span>OD real de MySQL</span></div>
+            {numberValue(operationalControls.feed_events) > 0 ? <div className="ras-feed-cloud">{Array.from({ length: 18 }).map((_, index) => <i key={index} style={{ "--i": index } as CSSProperties} />)}</div> : null}
             <div className="ras-scene-status">
-              <span>Corriente circular</span>
-              <span>{waterClarity === "clear" ? "Agua clara" : waterClarity === "moderate" ? "Claridad media" : "Agua turbia"}</span>
+              <span>{behaviorLabel(behavior)}</span>
+              <span>Carga {formatNumber(organicLoadIndex, 0)}%</span>
+              <span>{waterClarity === "clear" ? "Agua clara" : waterClarity === "moderate" ? "Claridad media" : "Agua cargada"}</span>
             </div>
           </div>
           <div className="ras-engineering-strip">
-            <div><span>Carga configurada</span><strong>{formatNumber(operationalControls.fish_count, 0)} peces</strong></div>
-            <div><span>Aireación</span><strong>{formatNumber(operationalControls.aeration_percent, 0)}%</strong></div>
-            <div><span>Filtración</span><strong>{formatNumber(operationalControls.filtration_percent, 0)}%</strong></div>
-            <div><span>Último dato</span><strong>{formatDateTime(baselineObservedAt.dissolved_oxygen_mg_l)}</strong></div>
+            <div><span>Población</span><strong>{formatNumber(initialProductiveState.fish_count, 0)} peces</strong></div>
+            <div><span>Biomasa actual</span><strong>{formatNumber(initialProductiveState.biomass_kg, 2)} kg</strong></div>
+            <div><span>Densidad</span><strong>{formatNumber(initialProductiveState.density_kg_m3, 2)} kg/m³</strong></div>
+            <div><span>Ración diaria</span><strong>{formatNumber(chartRows[0]?.daily_feed_kg, 3)} kg</strong></div>
           </div>
           <div className="pool-live-panel ras-live-measurements">
             {liveMeasurementCards.map((measurement) => <div className="pool-live-card" key={measurement.code}><div className="pool-live-card-head"><span>{measurement.label}</span><Badge kind={text(baselineQualityFlags[measurement.code]) === "valid" ? "success" : "warning"}>{text(baselineQualityFlags[measurement.code], "sin dato")}</Badge></div><strong>{formatNumber(measurement.value, 2)} <em>{text(baselineUnits[measurement.code], measurement.fallbackUnit)}</em></strong><small>Medido: {formatDateTime(baselineObservedAt[measurement.code])}</small><small>Guardado: {formatDateTime(baselineIngestedAt[measurement.code])}</small></div>)}
@@ -704,13 +725,15 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
           <div className="studio-card ras-panel">
             <div className="card-head"><div><h2>INTELIGENCIA DEL GEMELO</h2><p className="soft">Ejecuta modelos, riesgos y recomendaciones reales.</p></div><Brain size={20} /></div>
             <button type="button" className="success-action native-wide" disabled={snapshotMutation.isPending} onClick={() => snapshotMutation.mutate()}><Power size={16} /> {snapshotMutation.isPending ? "Ejecutando modelos" : "Ejecutar snapshot inteligente"}</button>
-            <MetricList rows={[["Snapshot", snapshot.snapshot_id ?? "pendiente"], ["Modelos ejecutados", modelOutputs.length], ["Riesgos", risks.length], ["Recomendaciones", recommendations.length]]} />
+            <MetricList rows={[["Biomasa final", `${formatNumber(simulationSummary.final_biomass_kg, 2)} kg`], ["Ganancia", `${formatNumber(simulationSummary.biomass_gain_kg, 2)} kg`], ["Alimento requerido", `${formatNumber(simulationSummary.feed_required_kg, 2)} kg`], ["Conducta final", behaviorLabel(text(simulationSummary.final_behavior))]]} />
           </div>
           <div className="studio-card ras-panel ras-event-log">
             <h2>REGISTRO DE PROCESOS</h2>
             <div><span>{formatDateTime(projection.generated_at)}</span><p>Proyección recalculada con datos limpios reales.</p></div>
             <div><span>{formatDateTime(snapshot.timestamp)}</span><p>{snapshot.snapshot_id ? "Snapshot y modelos ejecutados." : "Ejecute un snapshot para diagnóstico."}</p></div>
-            <div><span>Operación</span><p>Alimentaciones: {text(operationalControls.feed_events, "0")} · Sifonados: {text(operationalControls.siphon_events, "0")}</p></div>
+            <div><span>Alimentación</span><p>{text(operationalControls.feed_events, "0")} eventos · plan {formatNumber(operationalControls.feeding_percent, 0)}% · ración {formatNumber(chartRows[0]?.daily_feed_kg, 3)} kg/día.</p></div>
+            <div><span>Limpieza</span><p>{text(operationalControls.siphon_events, "0")} sifonados · filtración configurada al {formatNumber(operationalControls.filtration_percent, 0)}%.</p></div>
+            <div><span>Producción</span><p>{formatNumber(initialProductiveState.biomass_kg, 2)} kg actuales → {formatNumber(simulationSummary.final_biomass_kg, 2)} kg en {formatNumber(simulationSummary.horizon_days, 0)} días.</p></div>
           </div>
           <div className="studio-card ras-panel">
             <h2>RIESGOS Y RECOMENDACIONES</h2>
@@ -726,7 +749,7 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
         <div className="studio-card mlops-card twin-controls">
           <div className="card-head"><div><h2>ESCENARIO</h2><p className="soft">Los cambios son incrementos por hora y quedan identificados como simulación.</p></div><JsonButton label="Trazabilidad completa del escenario" value={projection} /></div>
           <div className="time-tabs interactive-time-tabs">
-            {[12, 24, 48, 72].map((hours) => <button type="button" className={horizonHours === hours ? "active" : ""} key={hours} onClick={() => setHorizonHours(hours)}>{hours}H</button>)}
+            {[24, 168, 720].map((hours) => <button type="button" className={horizonHours === hours ? "active" : ""} key={hours} onClick={() => setHorizonHours(hours)}>{hours === 24 ? "1 día" : hours === 168 ? "7 días" : "30 días"}</button>)}
           </div>
           <div className="field-grid">
             {Object.keys(adjustments).map((variable) => (
@@ -774,6 +797,25 @@ function DigitalTwinStudioView({ selectedPondId }: { selectedPondId: string }) {
             <Line yAxisId="environment" type="monotone" dataKey="ph" name="pH" stroke="#16a34a" strokeWidth={2.5} dot={false} />
             <Line yAxisId="water" type="monotone" dataKey="nitrate_ion" name="Nitrato" stroke="#8b5cf6" strokeWidth={2} dot={false} />
             <Brush dataKey="hour" height={26} stroke="#1976ff" travellerWidth={8} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </section>
+      <section className="studio-card mlops-card twin-chart-card productive-projection-card">
+        <div className="card-head"><div><h2>PROYECCIÓN BIOLÓGICA Y PRODUCTIVA</h2><p className="soft">Crecimiento, biomasa, alimento y estrés calculados para el escenario activo.</p></div><Badge kind={stressIndex >= 35 ? "warning" : "success"}>{formatNumber(simulationSummary.horizon_days, 0)} días</Badge></div>
+        <ResponsiveContainer width="100%" height={420}>
+          <ComposedChart data={chartRows} margin={{ top: 12, right: 28, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e6eef9" />
+            <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+            <YAxis yAxisId="production" tick={{ fontSize: 11 }} label={{ value: "kg / g", angle: -90, position: "insideLeft" }} />
+            <YAxis yAxisId="index" orientation="right" domain={[0, 100]} tick={{ fontSize: 11 }} label={{ value: "Índice %", angle: 90, position: "insideRight" }} />
+            <Tooltip formatter={(value, name) => [formatNumber(value, 3), name]} />
+            <Legend />
+            <Area yAxisId="production" type="monotone" dataKey="biomass_kg" name="Biomasa kg" stroke="#0284c7" fill="#bae6fd" fillOpacity={0.55} strokeWidth={3} dot={false} />
+            <Line yAxisId="production" type="monotone" dataKey="average_weight_g" name="Peso promedio g" stroke="#16a34a" strokeWidth={2.5} dot={false} />
+            <Line yAxisId="production" type="monotone" dataKey="cumulative_feed_kg" name="Alimento acumulado kg" stroke="#f59e0b" strokeWidth={2.5} dot={false} />
+            <Line yAxisId="index" type="monotone" dataKey="stress_index" name="Estrés simulado %" stroke="#ef4444" strokeWidth={2.5} dot={false} />
+            <Line yAxisId="index" type="monotone" dataKey="appetite_index" name="Apetito simulado %" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+            <Brush dataKey="hour" height={26} stroke="#0284c7" travellerWidth={8} />
           </ComposedChart>
         </ResponsiveContainer>
       </section>
@@ -840,6 +882,26 @@ function formatDateTime(value: unknown) {
   const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return text(value, "sin registro")
   return date.toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+}
+
+function behaviorLabel(value: string) {
+  const labels: Record<string, string> = {
+    normal: "Nado normal",
+    feeding: "Alimentándose",
+    stressed: "Estrés operativo",
+    disease_risk: "Riesgo de enfermedad",
+    critical_mortality_risk: "Riesgo crítico de mortalidad",
+  }
+  return labels[value] ?? value
+}
+
+function RasNumberInput({ label, value, min, step, unit, onChange }: { label: string; value: number; min: number; step: number; unit: string; onChange: (value: number) => void }) {
+  return (
+    <label className="ras-number-input">
+      <span>{label}</span>
+      <div><input type="number" min={min} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} /><strong>{unit}</strong></div>
+    </label>
+  )
 }
 
 function RasRange({ label, value, min, max, step = 1, unit, onChange }: { label: string; value: number; min: number; max: number; step?: number; unit: string; onChange: (value: number) => void }) {
