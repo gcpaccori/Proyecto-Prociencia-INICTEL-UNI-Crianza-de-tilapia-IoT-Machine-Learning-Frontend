@@ -4,7 +4,7 @@
 
 El frontend debe consumir el backend publico en `http://37.60.226.53:8000`.
 
-Si se despliega en Vercel, la variable visual/API debe apuntar a ese backend. Si queda vacia, el navegador consulta el dominio de Vercel y aparecen 404 en `/health`, `/farms`, `/ponds` y demas rutas.
+En produccion, la suite se sirve desde su contenedor Nginx y reenvia `/api/v1` al FastAPI local de la misma maquina virtual. No depende de proxies externos.
 
 El backend acepta rutas con `/api/v1` y tambien rutas directas para el frontend compilado: `/health`, `/farms`, `/ponds`, `/sensors`, `/measurements/clean`, `/ponds/{pond_id}/timeseries`, `/models`, `/alerts`, `/recommendations`, `/actuators`.
 

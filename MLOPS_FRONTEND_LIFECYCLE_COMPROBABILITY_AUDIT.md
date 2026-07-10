@@ -8,7 +8,7 @@ Fecha de verificacion: 2026-06-08.
 
 Backend consumido por frontend:
 
-- Base API publica: `https://proyecto-prociencia-inictel-uni-cri-seven.vercel.app/api/v1`
+- Base API de produccion: `http://37.60.226.53:8000/api/v1` mediante el proxy local de la suite.
 - Estado comprobado: `GET /health` responde online en produccion.
 - Dashboard comprobado: `GET /frontend/dashboard` devuelve granja, estanque, telemetria, 40 componentes integrables, 13 runners/modelos ejecutables, evidencias y trazabilidad.
 
