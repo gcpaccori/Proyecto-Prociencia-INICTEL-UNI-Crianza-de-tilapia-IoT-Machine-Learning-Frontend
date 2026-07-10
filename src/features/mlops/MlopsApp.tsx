@@ -314,7 +314,9 @@ function MlopsTopBar({
   return (
     <header className="topbar">
       <a className="brand laravel-brand" href="http://37.60.226.53/modelos-ml">
-        <img src="/logo_sisma.png" alt="SISMA Piscis" />
+        <span className="logo-mark logo-mark-topbar">
+          <img src="/logo_sisma.png" alt="SISMA Piscis" />
+        </span>
         <div className="brand-stack">
           <strong><span>SISMA</span> <b>Modelos ML</b></strong>
           <small>INICTEL-UNI / PROCIENCIA</small>
@@ -400,7 +402,9 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <img src="/logo_sisma.png" alt="SISMA Piscis" />
+        <span className="logo-mark logo-mark-sidebar">
+          <img src="/logo_sisma.png" alt="SISMA Piscis" />
+        </span>
         <span>Suite ML</span>
       </div>
       <nav>
