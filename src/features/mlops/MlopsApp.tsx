@@ -11,7 +11,6 @@ import {
   ChevronDown,
   ClipboardList,
   Database,
-  Droplet,
   FileJson,
   Fish,
   FlaskConical,
@@ -314,13 +313,13 @@ function MlopsTopBar({
   const online = ["online", "ok"].includes(text(backend.status, "").toLowerCase())
   return (
     <header className="topbar">
-      <div className="brand">
-        <Droplet size={30} />
+      <a className="brand laravel-brand" href="http://37.60.226.53/modelos-ml">
+        <img src="/logo_sisma.png" alt="SISMA Piscis" />
         <div className="brand-stack">
-          <strong><span>AquaTwin</span> <b>Studio</b></strong>
+          <strong><span>SISMA</span> <b>Modelos ML</b></strong>
           <small>INICTEL-UNI / PROCIENCIA</small>
         </div>
-      </div>
+      </a>
       <div className={online ? "top-pill status-online" : "top-pill status-offline"}>
         <span>Backend API</span>
         <strong>{online ? "ONLINE" : "REVISAR"}</strong>
@@ -400,6 +399,10 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
   const metrics = row(dashboard.system_metrics)
   return (
     <aside className="sidebar">
+      <div className="sidebar-brand">
+        <img src="/logo_sisma.png" alt="SISMA Piscis" />
+        <span>Suite ML</span>
+      </div>
       <nav>
         {items.map(({ id, label, Icon }) => (
           <button key={id} type="button" className={active === id ? "side-item active" : "side-item"} onClick={() => onChange(id)}>

@@ -199,9 +199,16 @@
   border: 0;
   background: transparent;
   color: #0c1828;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 850;
   letter-spacing: 0;
+  text-decoration: none;
+}
+
+.aquatwin-studio .brand img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
 }
 
 .aquatwin-studio .brand svg {
@@ -230,7 +237,9 @@
 
 .aquatwin-studio .brand b {
   margin-left: 2px;
-  color: #1597ff;
+  color: #0b7cff;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .aquatwin-studio .top-pill {
@@ -382,8 +391,27 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--at-border);
-  background: rgba(255, 255, 255, 0.82);
+  background: #ffffff;
   padding: 18px 14px;
+}
+
+.aquatwin-studio .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  margin: 0 4px 14px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--at-border);
+  color: #1f2a44;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.aquatwin-studio .sidebar-brand img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
 }
 
 .aquatwin-studio .side-item {
@@ -3177,6 +3205,10 @@
     border-bottom: 1px solid var(--at-border);
     padding: 10px;
     white-space: nowrap;
+  }
+
+  .aquatwin-studio .sidebar-brand {
+    display: none;
   }
 
   .aquatwin-studio .sidebar nav {
