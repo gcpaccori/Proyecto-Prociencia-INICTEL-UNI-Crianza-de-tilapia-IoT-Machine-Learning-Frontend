@@ -11,3 +11,5 @@ browser-check.png
 browser-check.har
 browser-check.spec.ts
 tests/browser-check.spec.ts
+
+.vercel
