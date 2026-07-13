@@ -318,7 +318,7 @@ function MlopsTopBar({
           <img src="/logo_sisma.png" alt="SISMA Piscis" />
         </span>
         <div className="brand-stack">
-          <strong><span>SISMA</span> <b>Modelos ML</b></strong>
+          <strong><span>SISMA</span> <b>Aprendizaje automatico</b></strong>
           <small>INICTEL-UNI / PROCIENCIA</small>
         </div>
       </a>
@@ -394,7 +394,7 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
     { id: "features", label: "Features", Icon: Table2 },
     { id: "training", label: "Entrenar", Icon: Brain },
     { id: "artifacts", label: "Artefactos", Icon: Boxes },
-    { id: "models", label: "Modelos ML", Icon: Rocket },
+    { id: "models", label: "Modelos de aprendizaje automatico", Icon: Rocket },
     { id: "digitalTwin", label: "Gemelo digital", Icon: Waves },
     { id: "traceability", label: "Trazabilidad", Icon: ClipboardList },
   ]
@@ -405,7 +405,7 @@ function MlopsSidebar({ active, onChange, dashboard }: { active: MlopsScreen; on
         <span className="logo-mark logo-mark-sidebar">
           <img src="/logo_sisma.png" alt="SISMA Piscis" />
         </span>
-        <span>Suite ML</span>
+        <span>Entrenamiento de modelos de aprendizaje automatico</span>
       </div>
       <nav>
         {items.map(({ id, label, Icon }) => (
